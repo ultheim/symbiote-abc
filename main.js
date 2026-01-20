@@ -841,10 +841,9 @@ window.spawnEntityVisuals = async function(entityNames) {
         let currentIndex = 0;
         
         // A. Build Images
-        // We do NOT remove elements from DOM. We just toggle 'active' class for opacity.
         images.forEach((imgData, i) => {
             const card = document.createElement("div");
-            card.className = `entity-card-item ${i === 0 ? 'active' : ''}`; // First one visible
+            card.className = `entity-card-item ${i === 0 ? 'active' : ''}`; 
             card.innerHTML = `<img src="${imgData.url}">`;
             stackElement.appendChild(card);
         });
@@ -856,45 +855,50 @@ window.spawnEntityVisuals = async function(entityNames) {
             indicatorContainer.appendChild(line);
         });
 
-        // C. Update View Function (Crossfade)
+        // C. Update View Function
         function showIndex(index) {
             const cards = stackElement.querySelectorAll('.entity-card-item');
             const lines = indicatorContainer.querySelectorAll('.indicator-line');
-            
-            // Toggle classes
             cards.forEach((c, i) => {
                 if(i === index) c.classList.add('active');
                 else c.classList.remove('active');
             });
-
             lines.forEach((l, i) => {
                 if(i === index) l.classList.add('active');
                 else l.classList.remove('active');
             });
         }
 
-        // D. Cycle Logic
-        function nextImage() {
-            currentIndex = (currentIndex + 1) % images.length;
-            showIndex(currentIndex);
-        }
+        function nextImage() { currentIndex = (currentIndex + 1) % images.length; showIndex(currentIndex); }
+        function prevImage() { currentIndex = (currentIndex - 1 + images.length) % images.length; showIndex(currentIndex); }
 
-        function prevImage() {
-            currentIndex = (currentIndex - 1 + images.length) % images.length;
-            showIndex(currentIndex);
-        }
-
-        // E. Mouse Wheel Logic (Vertical Scroll = Change Image)
+        // D. Desktop Wheel Logic
         stackElement.addEventListener('wheel', (e) => {
-            // Priority: If user scrolls VERTICALLY over the image, change image.
             if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                if (e.deltaY > 0) nextImage();
-                else prevImage();
+                e.preventDefault(); e.stopPropagation();
+                if (e.deltaY > 0) nextImage(); else prevImage();
             }
         });
+
+        // --- NEW: MOBILE SWIPE LOGIC ---
+        let touchStartY = 0;
+        stackElement.addEventListener('touchstart', (e) => {
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        stackElement.addEventListener('touchend', (e) => {
+            let touchEndY = e.changedTouches[0].clientY;
+            let diff = touchStartY - touchEndY;
+            
+            // Threshold of 30px to consider it a swipe
+            if (Math.abs(diff) > 30) {
+                // Prevent click firing if it was a swipe
+                e.stopPropagation(); 
+                if (diff > 0) nextImage(); // Swiped Up
+                else prevImage(); // Swiped Down
+            }
+        });
+        // -------------------------------
 
         // F. Click Selection
         stackElement.addEventListener('click', (e) => {
@@ -1026,3 +1030,4 @@ window.clearDecksSmoothly = function() {
     
 
 })();
+
