@@ -658,7 +658,7 @@ window.handleInput = function() {
         window.checkAuth(); // Update UI
         return;
     }
-
+	
     if (window.directorMode && text.toLowerCase() === "done") {
         window.directorMode = false;
         window.closeMedia(); 
@@ -689,6 +689,25 @@ window.handleInput = function() {
         return;
     }
 
+	// --- CLEAR CACHE / LOGOUT ---
+    if (text.toLowerCase() === "clear cache") {
+        // 1. Wipe credentials
+        localStorage.removeItem("symbiosis_api_key");
+        localStorage.removeItem("symbiosis_apps_script_url");
+        
+        // 2. Reset globals
+        USER_API_KEY = "";
+        
+        // 3. Feedback
+        window.speak("SYSTEM RESET. CREDENTIALS FLUSHED.");
+        
+        // 4. Reset UI to 'Auth Mode'
+        input.value = ""; 
+        input.blur();
+        window.checkAuth(); 
+        return;
+    }
+	
     // Dismiss any open overlays when new input comes
     window.handleCanvasClick();
 
@@ -1005,4 +1024,5 @@ window.clearDecksSmoothly = function() {
         }
     }, true);
     
+
 })();
