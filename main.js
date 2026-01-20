@@ -43,21 +43,43 @@ function enableDragScroll(slider) {
     let startX;
     let scrollLeft;
 
+    slider.style.display = 'flex';           
+    slider.style.flexWrap = 'nowrap';        
+    slider.style.overflowX = 'auto';         
+    slider.style.cursor = 'grab';
+    slider.style.scrollBehavior = 'auto'; 
+    slider.style.scrollSnapType = 'none'; 
+    slider.style.userSelect = 'none';        
+
+    slider.addEventListener('dragstart', (e) => e.preventDefault());
+
     slider.addEventListener('mousedown', (e) => {
         isDown = true;
-        slider.classList.add('active'); // Optional: Add css for cursor: grabbing
+        slider.style.cursor = 'grabbing';
+        e.preventDefault(); 
         startX = e.pageX - slider.offsetLeft;
         scrollLeft = slider.scrollLeft;
     });
-    slider.addEventListener('mouseleave', () => { isDown = false; });
-    slider.addEventListener('mouseup', () => { isDown = false; });
+
+    slider.addEventListener('mouseleave', () => { isDown = false; slider.style.cursor = 'grab'; });
+    slider.addEventListener('mouseup', () => { isDown = false; slider.style.cursor = 'grab'; });
+
     slider.addEventListener('mousemove', (e) => {
         if (!isDown) return;
         e.preventDefault();
         const x = e.pageX - slider.offsetLeft;
-        const walk = (x - startX) * 2; // Scroll-fast multiplier
+        const walk = (x - startX) * 2; 
         slider.scrollLeft = scrollLeft - walk;
     });
+
+    slider.addEventListener('wheel', (e) => {
+        if (e.deltaY !== 0) {
+            e.preventDefault();
+            // [CRITICAL ADDITION] Stop this event from bubbling up to the window
+            e.stopPropagation(); 
+            slider.scrollLeft += (e.deltaY * 3); 
+        }
+    }, { passive: false });
 }
 
 // --- TOGGLE MODES ---
@@ -474,6 +496,8 @@ async function handleChat(userText) {
                 window.addToHistory("ai", "SEARCH COMPLETED. NO ASSETS FOUND.");
             }
             
+			document.getElementById('wordInput').value = "";
+			
             window.isThinking = false;
             btn.textContent = "SYNC"; btn.disabled = false;
             return;
@@ -658,7 +682,7 @@ window.handleInput = function() {
         window.checkAuth(); // Update UI
         return;
     }
-	
+
     if (window.directorMode && text.toLowerCase() === "done") {
         window.directorMode = false;
         window.closeMedia(); 
@@ -688,7 +712,7 @@ window.handleInput = function() {
         input.blur();
         return;
     }
-
+	
 	// --- CLEAR CACHE / LOGOUT ---
     if (text.toLowerCase() === "clear cache") {
         // 1. Wipe credentials
@@ -747,6 +771,14 @@ window.onload = () => {
     window.checkAuth(); 
     const input = document.getElementById('wordInput');
     if(input) input.addEventListener('keypress',e=>{if(e.key==='Enter')window.handleInput()});
+
+    // 1. Activate the scroll logic for the media list
+    const mediaList = document.getElementById('media-list');
+    if (mediaList) enableDragScroll(mediaList);
+	
+	// 2. Activate for Entity Decks
+	const deckList = document.getElementById('entity-deck-container');
+    if (deckList) enableDragScroll(deckList);
 }
 
 window.handleEntitySelection = function(name, selectedStackElement) {
@@ -793,6 +825,7 @@ window.spawnEntityVisuals = async function(entityNames) {
         // A. The Unit (Holds everything)
         const unit = document.createElement("div");
         unit.className = "entity-unit";
+		unit.style.flexShrink = "0";
         
         // B. The Stack (Holds Images)
         const stack = document.createElement("div");
@@ -841,9 +874,10 @@ window.spawnEntityVisuals = async function(entityNames) {
         let currentIndex = 0;
         
         // A. Build Images
+        // We do NOT remove elements from DOM. We just toggle 'active' class for opacity.
         images.forEach((imgData, i) => {
             const card = document.createElement("div");
-            card.className = `entity-card-item ${i === 0 ? 'active' : ''}`; 
+            card.className = `entity-card-item ${i === 0 ? 'active' : ''}`; // First one visible
             card.innerHTML = `<img src="${imgData.url}">`;
             stackElement.appendChild(card);
         });
@@ -855,50 +889,45 @@ window.spawnEntityVisuals = async function(entityNames) {
             indicatorContainer.appendChild(line);
         });
 
-        // C. Update View Function
+        // C. Update View Function (Crossfade)
         function showIndex(index) {
             const cards = stackElement.querySelectorAll('.entity-card-item');
             const lines = indicatorContainer.querySelectorAll('.indicator-line');
+            
+            // Toggle classes
             cards.forEach((c, i) => {
                 if(i === index) c.classList.add('active');
                 else c.classList.remove('active');
             });
+
             lines.forEach((l, i) => {
                 if(i === index) l.classList.add('active');
                 else l.classList.remove('active');
             });
         }
 
-        function nextImage() { currentIndex = (currentIndex + 1) % images.length; showIndex(currentIndex); }
-        function prevImage() { currentIndex = (currentIndex - 1 + images.length) % images.length; showIndex(currentIndex); }
+        // D. Cycle Logic
+        function nextImage() {
+            currentIndex = (currentIndex + 1) % images.length;
+            showIndex(currentIndex);
+        }
 
-        // D. Desktop Wheel Logic
+        function prevImage() {
+            currentIndex = (currentIndex - 1 + images.length) % images.length;
+            showIndex(currentIndex);
+        }
+
+        // E. Mouse Wheel Logic (Vertical Scroll = Change Image)
         stackElement.addEventListener('wheel', (e) => {
+            // Priority: If user scrolls VERTICALLY over the image, change image.
             if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-                e.preventDefault(); e.stopPropagation();
-                if (e.deltaY > 0) nextImage(); else prevImage();
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (e.deltaY > 0) nextImage();
+                else prevImage();
             }
         });
-
-        // --- NEW: MOBILE SWIPE LOGIC ---
-        let touchStartY = 0;
-        stackElement.addEventListener('touchstart', (e) => {
-            touchStartY = e.touches[0].clientY;
-        }, { passive: true });
-
-        stackElement.addEventListener('touchend', (e) => {
-            let touchEndY = e.changedTouches[0].clientY;
-            let diff = touchStartY - touchEndY;
-            
-            // Threshold of 30px to consider it a swipe
-            if (Math.abs(diff) > 30) {
-                // Prevent click firing if it was a swipe
-                e.stopPropagation(); 
-                if (diff > 0) nextImage(); // Swiped Up
-                else prevImage(); // Swiped Down
-            }
-        });
-        // -------------------------------
 
         // F. Click Selection
         stackElement.addEventListener('click', (e) => {
@@ -910,36 +939,6 @@ window.spawnEntityVisuals = async function(entityNames) {
     // Create stacks
     entityNames.forEach(name => createEntityUnit(name));
     
-    // --- GLOBAL HORIZONTAL SCROLL FIX ---
-    // 1. Clean up old listener
-    if (window._deckScrollHandler) {
-        window.removeEventListener('wheel', window._deckScrollHandler);
-    }
-
-    // 2. Define Handler
-    window._deckScrollHandler = (e) => {
-        const container = document.getElementById("entity-deck-container");
-        
-        // Safety check
-        if (!container || !container.hasChildNodes()) return;
-
-        // If hovering a specific stack, let that stack handle the Vertical Scroll (Images)
-        // The stack's own listener handles e.stopPropagation()
-        if (e.target.closest('.entity-stack')) return;
-
-        // --- SCROLL LOGIC ---
-        // We capture ALL vertical wheel events and force them to be horizontal
-        // This prevents the "vanishing" feel where the browser tries to vertically scroll the page
-        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-            e.preventDefault(); // LOCK THE BROWSER SCROLL
-            
-            // Apply scroll with a slight multiplier for better feel
-            container.scrollLeft += (e.deltaY * 1.5); 
-        }
-    };
-
-    // 3. Attach with { passive: false } to allow preventDefault
-    window.addEventListener('wheel', window._deckScrollHandler, { passive: false });
 };
 
 // --- HELPER: Smoothly Clear Decks ---
@@ -1028,6 +1027,25 @@ window.clearDecksSmoothly = function() {
         }
     }, true);
     
-
 })();
 
+// ============================================
+// GLOBAL SCROLL CONTROLLER
+// ============================================
+window.addEventListener('wheel', (e) => {
+    // 1. If we are hovering a specific deck (stack), let the stack handle the event (Image swapping)
+    if (e.target.closest('.entity-stack')) return;
+
+    // 2. Locate the Deck Container
+    const container = document.getElementById("entity-deck-container");
+
+    // 3. If the container exists and has decks in it...
+    if (container && container.hasChildNodes()) {
+        // ...manually scroll it using the mouse wheel!
+        if (e.deltaY !== 0) {
+            // Optional: e.preventDefault() if you want to stop page scrolling entirely
+            // e.preventDefault(); 
+            container.scrollLeft += (e.deltaY * 3);
+        }
+    }
+}, { passive: false });
