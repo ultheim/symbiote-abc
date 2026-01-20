@@ -808,23 +808,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (max-width: 768px) {
     /* 1. Make the container scrollable horizontally */
     #entity-deck-container {
-        /* FIX: Use 100% height to prevent "black area" clipping */
-        pointer-events: auto;
-		height: 100%; 
-        top: 0;
-        transform: none; /* Remove centering transform */
+        /* FIX 1: Create a "Band" in the middle instead of full height.
+           This leaves top/bottom open for touching particles, 
+           but keeps the middle area scrollable. */
+        height: 50vh; 
+        top: 50%;
+        transform: translateY(-50%);
         
-        /* FIX: Enable click-through so particles are responsive */
-        pointer-events: none; 
+        /* FIX 2: Re-enable interaction so you can SWIPE the list */
+        pointer-events: auto; 
         
         /* Layout for scrolling */
         display: flex;
         align-items: center; /* Vertical Center */
         overflow-x: auto;            
-        overflow-y: hidden; /* Prevent vertical scroll of the strip */
+        overflow-y: hidden; 
         
         /* Centering Logic: (Screen Half) - (Half Card Width 100px) */
-        /* This creates the "Center Lock" effect */
         padding-left: calc(50vw - 100px);          
         padding-right: calc(50vw - 100px);
         
@@ -839,32 +839,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     
     #entity-deck-container::-webkit-scrollbar { display: none; }
 
-    /* Remove the phantom padding on mobile to fix snap alignment */
     #entity-deck-container::after { display: none; }
 
     /* 2. The Wrapper (Entity Unit) */
     .entity-unit {
-        /* FIX: Re-enable touch events ONLY on the cards */
-        pointer-events: auto; 
-        
-        /* FIX: Explicit width matches the padding calculation (200px) */
         width: 200px; 
-        height: auto; /* Let content dictate height */
-        
+        height: auto; 
         flex-shrink: 0; 
-        scroll-snap-align: center; /* Locks card to center */
-        margin-right: 0; /* Reset margins */
+        scroll-snap-align: center; 
+        margin-right: 0; 
+        
+        /* FIX 3: Ensure children don't block the scroll gesture */
+        pointer-events: none; 
     }
 
-    /* 3. The Visual Stack */
+    /* 3. The Visual Stack & Label - Make them interactive */
+    .entity-stack, .entity-stack-label {
+        pointer-events: auto;
+    }
+
     .entity-stack {
-        width: 100%; /* Fill the unit */
-        height: 280px; /* Fixed height for visual consistency */
+        width: 100%; 
+        height: 280px; 
     }
 
     .entity-stack-label {
         font-size: 12px;
-        margin-top: 10px; /* Adjust spacing */
+        margin-top: 10px; 
     }
 
     /* 4. Adjust input bar for mobile */
@@ -923,4 +924,5 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     }
 
 }
+
 
