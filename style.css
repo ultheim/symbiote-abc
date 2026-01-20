@@ -437,42 +437,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 #media-list::-webkit-scrollbar-track { background: transparent; }
 
 /* Individual File Card */
+/* --- CONSOLIDATED MEDIA ITEM (Desktop & Ratio Fix) --- */
 .media-item {
-    /* REMOVED: min-width: 280px; */
-    /* REMOVED: width: 280px; */
-    /* REMOVED: aspect-ratio: 16 / 9; */
-    
-    /* NEW: Let height define the size, width adjusts automatically */
-    height: 50vh; /* Adjust this value to make the strip taller/shorter */
-    width: auto;
-    flex-shrink: 0; /* Prevents squishing */
-    
-    /* Carousel Physics */
-    scroll-snap-align: center;
-    scroll-snap-stop: always; /* Prevents users from accidentally skipping many items */
-    
-    /* Styling */
-    position: relative;
-    background: transparent; /* Changed from #000 to transparent */
-    border: 1px solid #333; /* The border will now hug the image */
-    border-radius: 4px;
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-}
-
-/* --- UPDATED: DYNAMIC CAROUSEL & HOVER EFFECTS --- */
-
-/* 1. The Container Card: Fixed Height, Auto Width (Preserves Aspect Ratio) */
-.media-item {
-    height: 50vh; /* Sets the track height */
-    width: auto;  /* Width adjusts to fit image ratio */
+    /* [CRITICAL FIX] Match Deck Ratio exactly */
+    height: 50vh; 
+    width: 35vh;   
     flex-shrink: 0;
     scroll-snap-align: center;
     
     position: relative;
-    background: transparent;
+    background: #000; /* Black bg fills gaps if image is weird */
     border: 1px solid #333;
     border-radius: 4px;
     overflow: hidden;
@@ -481,11 +455,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     opacity: 1;
     transform: translateX(0);
     
-    /* High-speed "Zip" timing function */
+    /* Animation timing */
     transition: 
         transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), 
         opacity 0.4s ease,
-        filter 0.4s ease;
+        filter 0.4s ease,
+        border-color 0.3s ease;
+}
+
+/* Ensure the thumbnail fills the card shape */
+.media-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* This crops the video thumbnail to fit the 35:50 card */
+	object-position: center;
+    display: block;
+    transition: filter 0.4s ease;
 }
 
 /* Entrance: Zip in from Left (Train Start) */
@@ -515,7 +500,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .media-thumb {
     width: auto;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
     display: block;
     transition: filter 0.4s ease;
 }
