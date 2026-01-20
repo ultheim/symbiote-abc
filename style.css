@@ -1,0 +1,909 @@
+/* Update in style.css */
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #050505;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    position: fixed; 
+    width: 100%; 
+    height: 100dvh; /* Change from 100vh to 100dvh */
+}
+
+#symbiosis-container {
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100dvh; /* Match the body height */
+    z-index: 1;
+}
+canvas { display: block; }
+
+/* --- MOOD LEGEND (New) --- */
+#mood-legend {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 250px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    z-index: 5;
+    pointer-events: none; /* Let clicks pass through */
+    transition: opacity 0.5s ease;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.8);
+    text-shadow: 0 1px 2px black;
+}
+
+.legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: white;
+    box-shadow: 0 0 8px currentColor;
+}
+
+.legend-text {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* --- TERMINAL HISTORY --- */
+#terminal-history {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(5, 5, 8, 0.95);
+    z-index: 8; /* Below UI, Above Canvas */
+    backdrop-filter: blur(10px);
+    overflow-y: auto;
+    padding: 20px;
+    box-sizing: border-box;
+    transition: opacity 0.3s ease, pointer-events 0.3s ease;
+    opacity: 1;
+    pointer-events: auto;
+}
+#terminal-history.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+#terminal-content {
+    max-width: 800px;
+    margin: 60px auto 120px auto; /* Space for UI */
+    color: #aaa;
+}
+.term-msg { margin-bottom: 20px; line-height: 1.5; border-bottom: 1px solid #222; padding-bottom: 10px; }
+.term-user { color: #ff7300; font-weight: bold; }
+.term-ai { color: #ccc; }
+
+/* Interactive History Styles */
+.term-ai.interactive {
+    cursor: pointer;
+    transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+.term-ai.interactive:hover {
+    color: #fff;
+    text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+.term-ai.interactive::after {
+    content: " [RESTORE GRAPH]";
+    font-size: 0.7em;
+    color: #555;
+    margin-left: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.term-ai.interactive:hover::after {
+    opacity: 1;
+}
+
+.term-meta { font-size: 0.8em; color: #555; margin-bottom: 4px; }
+
+/* --- SUBTITLES --- */
+#subtitle-mask {
+    position: absolute;
+    bottom: 140px; 
+    left: 50%;
+    transform: translateX(-50%);
+    width: 85%; 
+    height: 50px;
+    overflow: hidden;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 1s ease;
+    mask-image: linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+#subtitle-track {
+    display: flex;
+    align-items: center;
+    justify-content: left; 
+    white-space: nowrap;
+    position: absolute;
+    left: 50%; 
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); 
+}
+
+.char-span {
+    font-family: 'Courier New', monospace; 
+    font-size: 16px; 
+    color: rgba(255, 115, 0, 0.3); 
+    transition: all 0.2s ease; 
+    text-transform: uppercase; 
+    letter-spacing: 2px;
+    flex-shrink: 0; 
+    margin-right: 15px; 
+}
+
+.char-span.active {
+    color: #fff; 
+    font-size: 22px; 
+    font-weight: bold;
+    text-shadow: 0 0 15px rgba(255, 115, 0, 0.9);
+    transform: scale(1.1);
+}
+
+/* --- FULL TEXT DISPLAY (New) --- */
+#full-text-display {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -60%);
+    width: 85%;
+    max-width: 700px;
+    max-height: 60vh;
+    background: rgba(10, 10, 12, 0.9);
+    border: 1px solid rgba(255, 115, 0, 0.3);
+    padding: 30px;
+    border-radius: 10px;
+    z-index: 20;
+    backdrop-filter: blur(15px);
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#full-text-display.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -55%) scale(0.95);
+}
+
+#text-content {
+    color: #e0e0e0;
+    font-size: 16px;
+    line-height: 1.6;
+    text-align: left;
+    white-space: pre-wrap;
+}
+
+/* --- UI LAYER --- */
+#ui-layer {
+    position: fixed; 
+    bottom: 0; /* Changed from 30px to 0 for better mobile anchoring */
+    left: 0;
+    width: 100%;
+    z-index: 10; 
+    display: flex; 
+    justify-content: center;
+    pointer-events: none; /* Let clicks pass through around the bar */
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+#ui-bar {
+    pointer-events: auto;
+    display: flex;
+    gap: 10px;
+    width: 90%;
+    max-width: 500px;
+    background: rgba(10, 10, 10, 0.9); 
+    padding: 12px; 
+    border-radius: 30px;
+    border: 1px solid rgba(255, 115, 0, 0.2); 
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    transition: all 0.3s ease;
+}
+
+#ui-bar.auth-mode {
+    border-color: #ff0000;
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.2);
+}
+
+input {
+    background: transparent; border: none; color: #ff7300; padding: 10px 10px;
+    flex-grow: 1; font-family: monospace; text-transform: uppercase; 
+    outline: none; font-size: 16px;
+}
+
+button {
+    background: rgba(255, 115, 0, 0.15); border: 1px solid rgba(255, 115, 0, 0.5);
+    color: #ff7300; padding: 10px 15px; border-radius: 20px; font-weight: bold;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap; font-size: 14px;
+}
+button:active { background: #ff7300; color: black; transform: scale(0.95); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Mobile specific adjustment */
+@media (max-width: 600px) {
+    #ui-bar { width: 95%; padding: 8px; }
+    button { padding: 8px 12px; font-size: 12px; }
+    input { font-size: 14px; }
+}
+
+#node-tooltip {
+    position: fixed;
+    background: rgba(10, 15, 20, 0.95);
+    border: 1px solid rgba(255, 115, 0, 0.5);
+    color: #eee;
+    padding: 10px 15px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    max-width: 250px;
+    z-index: 100;
+    pointer-events: none; /* Mouse passes through so it doesn't flicker */
+    box-shadow: 0 4px 15px rgba(0,0,0,0.8);
+    backdrop-filter: blur(5px);
+    transition: opacity 0.2s ease;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+
+#node-tooltip.hidden {
+    opacity: 0;
+}
+
+#node-tooltip strong {
+    color: #ff7300;
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+#director-overlay {
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100dvh; 
+    
+    background: rgba(0,0,0,0.9); 
+    z-index: 50;
+    
+    /* FIX: Use Flexbox for robust centering */
+    display: flex;
+    align-items: center;     /* Vertical Center */
+    justify-content: center; /* Horizontal Center */
+    
+    backdrop-filter: blur(5px);
+    
+    /* Fade settings */
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.8s ease, visibility 0.8s ease;
+}
+
+#director-overlay.hidden {
+    /* Instead of display:none, we hide it while keeping it animatable */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none; 
+}
+
+/* Update the Stage to be flexible */
+#media-stage {
+    width: 90%; 
+    max-width: 1000px;
+    /* REMOVE aspect-ratio: 16/9 here. We will add it via class for videos only. */
+    height: auto;
+    max-height: 85vh; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 10px;
+    transition: all 0.3s ease;
+}
+
+/* ADD THIS: Forces height when showing the list */
+/* 1. Remove rigid constraints from the stage container */
+#media-stage {
+    width: auto;             /* Allow width to adjust */
+    max-width: 95vw;         /* Max width is screen width */
+    height: auto;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;     /* Center the content */
+    gap: 10px;
+    transition: all 0.3s ease;
+}
+
+/* 2. Video Mode: Keep aspect ratio but remove background */
+#media-stage.video-mode {
+    /* MATH EXPLANATION:
+       16:9 ratio means Width is approx 1.77x Height.
+       If we want max-height to be 80vh, max-width must be roughly 140vh.
+       min(90%, 1000px, 140vh) ensures it never grows so wide that it becomes too tall.
+    */
+    width: min(90%, 1000px, 140vh);
+    
+    max-height: 85vh; /* Safety cap */
+    background: transparent; 
+    
+    /* Ensure the flex parent centers this child */
+    margin: auto; 
+}
+
+/* 3. Image Mode: Let image define the frame */
+#media-stage.image-mode {
+    aspect-ratio: auto;
+    width: auto;
+    background: transparent;
+}
+
+/* 4. Remove the visible "Frame" borders/backgrounds */
+#media-frame {
+    width: 100%; 
+    height: auto;            /* Allow height to adjust based on width */
+    aspect-ratio: 16 / 9;    /* <--- MOVED HERE: Forces video to be 16:9 */
+    
+    border: none;            
+    background: transparent; 
+    display: block;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5); 
+}
+
+#media-image {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+    border: none;            /* REMOVED ORANGE BORDER */
+    background: transparent; /* REMOVED BLACK BG */
+    display: block;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+#media-image.hidden {
+    display: none;
+}
+
+#media-controls {
+    display: flex; 
+    justify-content: center; /* Changed from space-between to center */
+    align-items: center;
+    color: #ff7300; 
+    font-family: monospace;
+    padding: 10px 0;
+}
+/* --- DIRECTOR CAROUSEL VIEW --- */
+#media-list {
+    width: 100%;
+    height: 100%;
+    /* Horizontal Scroll Layout */
+    display: flex;
+    flex-direction: row;
+    gap: 30px;
+    padding: 40px 60px; /* Padding for hover growth */
+    box-sizing: border-box;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    
+    /* Center items vertically */
+    align-items: center;
+    
+    /* Background for the strip */
+    background: linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, rgba(10,10,10,0.8) 50%, rgba(0,0,0,0.9) 100%);
+	
+	overflow-x: auto;
+    scroll-behavior: smooth; /* Makes the wheel scroll feel fluid */
+    -webkit-overflow-scrolling: touch; /* Momentum scrolling for trackpads/mobile */
+	scroll-padding: 0 60px;
+}
+}
+
+#media-list.hidden {
+    display: none;
+}
+
+#media-frame.hidden {
+    display: none;
+}
+
+/* Hide Scrollbar but allow scrolling */
+#media-list::-webkit-scrollbar { height: 6px; }
+#media-list::-webkit-scrollbar-thumb { background: #ff7300; border-radius: 3px; }
+#media-list::-webkit-scrollbar-track { background: transparent; }
+
+/* Individual File Card */
+.media-item {
+    /* REMOVED: min-width: 280px; */
+    /* REMOVED: width: 280px; */
+    /* REMOVED: aspect-ratio: 16 / 9; */
+    
+    /* NEW: Let height define the size, width adjusts automatically */
+    height: 50vh; /* Adjust this value to make the strip taller/shorter */
+    width: auto;
+    flex-shrink: 0; /* Prevents squishing */
+    
+    /* Carousel Physics */
+    scroll-snap-align: center;
+    scroll-snap-stop: always; /* Prevents users from accidentally skipping many items */
+    
+    /* Styling */
+    position: relative;
+    background: transparent; /* Changed from #000 to transparent */
+    border: 1px solid #333; /* The border will now hug the image */
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+
+/* --- UPDATED: DYNAMIC CAROUSEL & HOVER EFFECTS --- */
+
+/* 1. The Container Card: Fixed Height, Auto Width (Preserves Aspect Ratio) */
+.media-item {
+    height: 50vh; /* Sets the track height */
+    width: auto;  /* Width adjusts to fit image ratio */
+    flex-shrink: 0;
+    scroll-snap-align: center;
+    
+    position: relative;
+    background: transparent;
+    border: 1px solid #333;
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    opacity: 1;
+    transform: translateX(0);
+    
+    /* High-speed "Zip" timing function */
+    transition: 
+        transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), 
+        opacity 0.4s ease,
+        filter 0.4s ease;
+}
+
+/* Entrance: Zip in from Left (Train Start) */
+.media-item.entering {
+    opacity: 0;
+    transform: translateX(-100vw); 
+    pointer-events: none;
+}
+
+/* Exit: Zip out to Right (Train Exit) */
+.media-item.dissolving {
+    opacity: 0;
+    transform: translateX(100vw) scale(0.9);
+    filter: blur(10px);
+    pointer-events: none;
+}
+
+/* Hover Scale Effect */
+.media-item:hover {
+    transform: scale(1.05);
+    border-color: #ff7300;
+    box-shadow: 0 0 25px rgba(255, 115, 0, 0.3);
+    z-index: 10;
+}
+
+/* 2. The Thumbnail: Fills height, defines width */
+.media-thumb {
+    width: auto;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    transition: filter 0.4s ease;
+}
+
+/* Hover: Blur & Darken */
+.media-item:hover .media-thumb {
+    filter: blur(8px) brightness(0.4);
+}
+
+/* 3. Info Overlay: Bottom (Default) -> Center (Hover) */
+.media-info {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    
+    /* Layout Logic */
+    display: flex;
+    flex-direction: column;
+    
+    /* DEFAULT STATE: Content pushed to bottom */
+    justify-content: flex-end; 
+    align-items: center;
+    text-align: center;
+    
+    padding: 20px;
+    box-sizing: border-box;
+    
+    /* DEFAULT BACKGROUND: Dark gradient at bottom only */
+    background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 50%);
+    opacity: 1; /* Always visible */
+    transition: background 0.4s ease;
+}
+
+/* HOVER STATE: Center content, remove gradient (since image is dark) */
+.media-item:hover .media-info {
+    justify-content: center;
+    background: transparent;
+}
+
+/* 4. Typography Updates */
+.media-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 0 2px 10px black;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+    transition: margin 0.3s ease;
+}
+
+.media-type {
+    color: #ff7300;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0; /* Tight to bottom by default */
+}
+
+/* 5. Description: Hidden (Default) -> Visible & Left Aligned (Hover) */
+.media-desc {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #e0e0e0;
+    line-height: 1.5;
+    text-shadow: 0 1px 5px black;
+    
+    /* ALIGNMENT & FORMATTING FIXES */
+    text-align: left;        /* Align text to left */
+    white-space: pre-wrap;   /* Preserve paragraphs/line-breaks */
+    width: 100%;
+    
+    /* DEFAULT: Collapsed and invisible */
+    max-height: 0;
+    opacity: 0;
+    overflow-y: hidden;
+    margin-top: 0;
+    
+    transition: all 0.4s ease;
+}
+
+/* HOVER: Expand and show */
+.media-item:hover .media-desc {
+    max-height: 60%;         /* Allow expansion */
+    opacity: 1;
+    margin-top: 15px;        /* Space between title and desc */
+    overflow-y: auto;        /* Scroll if text is long */
+    padding-right: 5px;
+}
+
+/* Custom Scrollbar for Description */
+.media-desc::-webkit-scrollbar { width: 4px; }
+.media-desc::-webkit-scrollbar-thumb { background: #ff7300; border-radius: 2px; }
+.media-desc::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.1); }
+.media-item:active {
+    transform: scale(0.98); /* Slight compression feel when tapped */
+    border-color: #ff7300;
+}
+
+@media (hover: none) {
+    /* On mobile, show a hint of the description or keep info visible */
+    .media-info {
+        background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);
+    }
+    .media-title {
+        margin-bottom: 10px;
+    }
+}
+
+/* --- ENTITY DECK CONTAINER (The Track) --- */
+#entity-deck-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    
+    /* Layout */
+    display: flex;
+    flex-direction: row;
+    gap: 40px; 
+    padding: 0 60px; /* Left padding */
+    align-items: center;
+    
+    background: transparent;
+    pointer-events: none; /* Click-through to UI */
+    
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    z-index: 40;
+    
+    /* Entry Animation */
+    animation: deckEntry 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* FIX 1: PHANTOM PADDING (Forces scroll to reach the very end) */
+#entity-deck-container::after {
+    content: "";
+    display: block;
+    min-width: 60px; /* Match your desired right padding */
+    height: 1px;
+    flex-shrink: 0;
+}
+
+/* Hide Scrollbar */
+#entity-deck-container::-webkit-scrollbar { height: 6px; }
+#entity-deck-container::-webkit-scrollbar-thumb { background: #ff7300; border-radius: 3px; }
+#entity-deck-container::-webkit-scrollbar-track { background: transparent; }
+
+/* --- ENTITY UNIT (Wrapper) --- */
+.entity-unit {
+    position: relative;
+    height: 50vh; 
+    width: 35vh; 
+    flex-shrink: 0;
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
+    
+    /* FIX 2: DEAD ZONES - Allow clicks to pass through the empty areas of this box */
+    pointer-events: none; 
+    
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.entity-unit.dissolving {
+    opacity: 0;
+    transform: translateX(100vw) scale(0.9); /* Zip to right */
+    filter: blur(5px);
+    transition: all 0.5s cubic-bezier(0.55, 0.085, 0.68, 0.53); /* Accelerate out */
+    pointer-events: none;
+}
+
+/* 2. SELECTED STATE */
+/* This highlights the chosen deck while waiting for the video */
+.entity-unit.selected .entity-stack {
+    transform: scale(1.15);
+    border-color: #ff7300;
+    box-shadow: 0 0 30px rgba(255, 115, 0, 0.5);
+    z-index: 100;
+    transition: all 0.3s ease;
+}
+
+/* Ensure the label also pops */
+.entity-unit.selected .entity-stack-label {
+    color: #fff;
+    text-shadow: 0 0 10px #ff7300;
+}
+
+/* --- THE IMAGE STACK --- */
+.entity-stack {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    
+    /* FIX 2: RE-ENABLE INTERACTION - Only the card itself blocks particles/clicks */
+    pointer-events: auto; 
+    
+    background: transparent;
+    border: 1px solid #333;
+    border-radius: 4px;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    overflow: hidden;
+    transition: transform 0.3s ease, border-color 0.3s;
+}
+
+/* Keep the rest of your CSS (card items, labels, etc) as they were */
+.entity-stack:hover {
+    transform: scale(1.02);
+    border-color: #ff7300;
+    box-shadow: 0 0 25px rgba(255, 115, 0, 0.3);
+}
+
+/* --- THE CARDS (Clean Crossfade) --- */
+.entity-card-item {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    
+    /* Smooth Opacity Transition */
+    opacity: 0; 
+    transition: opacity 0.5s ease-in-out;
+    pointer-events: none;
+}
+
+.entity-card-item.active {
+    opacity: 1;
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.entity-card-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* --- INDICATORS (Thin Lines) --- */
+.entity-indicators {
+    position: absolute;
+    right: -15px; /* Sit to the right of the image */
+    top: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 4px;
+}
+
+.indicator-line {
+    width: 2px;
+    flex-grow: 1; /* Distribute height evenly */
+    max-height: 40px; /* Don't get too tall if few images */
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    transition: background 0.3s, height 0.3s;
+}
+
+.indicator-line.active {
+    background: #ff7300;
+    width: 3px;
+    box-shadow: 0 0 5px #ff7300;
+}
+
+/* --- LABEL (Persistent) --- */
+.entity-stack-label {
+    margin-top: 15px;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 14px;
+    color: #ff7300;
+    text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+    letter-spacing: 1px;
+    text-align: center;
+    width: 100%;
+}
+
+
+/* --- MOBILE OPTIMIZATIONS (iPhone/Android) --- */
+@media (max-width: 768px) {
+    /* 1. Make the container scrollable horizontally */
+    #entity-deck-container {
+        /* FIX: Limit height so we don't block the canvas/UI */
+        height: 350px; 
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: auto; /* Now only captures touches in the middle strip */
+        
+        /* Layout for scrolling */
+        justify-content: flex-start; 
+        align-items: center;
+        overflow-x: auto;            
+        
+        /* Centering Logic: Padding = 50% screen width - Half card width (100px) */
+        padding-left: calc(50vw - 100px);          
+        padding-right: calc(50vw - 100px);
+        
+        gap: 30px;
+        perspective: 800px;
+        
+        /* Snap Physics */
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        
+        /* Hide Scrollbar */
+        scrollbar-width: none; 
+        -ms-overflow-style: none;
+    }
+    
+    #entity-deck-container::-webkit-scrollbar { 
+        display: none; 
+    }
+
+    /* 2. Shrink the stacks & Add Snap Alignment */
+    .entity-stack {
+        width: 200px;
+        height: 280px;
+        flex-shrink: 0; 
+        scroll-snap-align: center; /* Locks card to center */
+    }
+
+    .entity-stack-label {
+        font-size: 12px;
+        top: -30px;
+    }
+
+    /* 3. Adjust input bar for mobile */
+    #ui-bar {
+        width: 90%;
+        bottom: 20px;
+    }
+}
+
+/* 1. Prevent "Bounce" and page dragging while interacting with visuals */
+#symbiosisCanvas, #symbiosis-container {
+    touch-action: none; /* Critical: Tells iOS this isn't a scrollable surface */
+    -webkit-tap-highlight-color: transparent; /* Removes blue tap box */
+}
+
+/* 2. Media Card "Tap-to-Peek" Support 
+   Mirror the :hover styles with a .mobile-hover class */
+.media-item.mobile-hover {
+    transform: scale(1.05);
+    border-color: #ff7300;
+    box-shadow: 0 0 25px rgba(255, 115, 0, 0.3);
+    z-index: 10;
+}
+.media-item.mobile-hover .media-thumb {
+    filter: blur(8px) brightness(0.4);
+}
+.media-item.mobile-hover .media-info {
+    justify-content: center;
+    background: transparent;
+}
+.media-item.mobile-hover .media-desc {
+    max-height: 60%;
+    opacity: 1;
+    margin-top: 15px;
+    padding-right: 5px;
+}
+
+/* 3. Entity Stack "Tap-to-Peek" Support */
+.entity-stack.mobile-hover {
+    transform: scale(1.02);
+    border-color: #ff7300;
+    box-shadow: 0 0 25px rgba(255, 115, 0, 0.3);
+}
+
+/* 4. Increase UI Hit Targets for Fingers */
+@media (hover: none) and (pointer: coarse) {
+    button { 
+        min-height: 44px; /* Apple Human Interface Guidelines minimum */
+        padding: 0 20px;
+    }
+    input {
+        font-size: 16px; /* Prevents iOS from zooming in on focus */
+    }
+    .legend-item {
+        padding: 5px 0; /* Easier to read on small screens */
+    }
+}
