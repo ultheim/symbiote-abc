@@ -808,18 +808,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (max-width: 768px) {
     /* 1. Make the container scrollable horizontally */
     #entity-deck-container {
-        /* FIX: Limit height so we don't block the canvas/UI */
-        height: 350px; 
-        top: 50%;
-        transform: translateY(-50%);
-        pointer-events: auto; /* Now only captures touches in the middle strip */
+        /* FIX: Use 100% height to prevent "black area" clipping */
+        height: 100%; 
+        top: 0;
+        transform: none; /* Remove centering transform */
+        
+        /* FIX: Enable click-through so particles are responsive */
+        pointer-events: none; 
         
         /* Layout for scrolling */
-        justify-content: flex-start; 
-        align-items: center;
+        display: flex;
+        align-items: center; /* Vertical Center */
         overflow-x: auto;            
+        overflow-y: hidden; /* Prevent vertical scroll of the strip */
         
-        /* Centering Logic: Padding = 50% screen width - Half card width (100px) */
+        /* Centering Logic: (Screen Half) - (Half Card Width 100px) */
+        /* This creates the "Center Lock" effect */
         padding-left: calc(50vw - 100px);          
         padding-right: calc(50vw - 100px);
         
@@ -829,30 +833,40 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
         /* Snap Physics */
         scroll-snap-type: x mandatory;
         -webkit-overflow-scrolling: touch;
-        
-        /* Hide Scrollbar */
         scrollbar-width: none; 
-        -ms-overflow-style: none;
     }
     
-    #entity-deck-container::-webkit-scrollbar { 
-        display: none; 
-    }
+    #entity-deck-container::-webkit-scrollbar { display: none; }
 
-    /* 2. Shrink the stacks & Add Snap Alignment */
-    .entity-stack {
-        width: 200px;
-        height: 280px;
+    /* Remove the phantom padding on mobile to fix snap alignment */
+    #entity-deck-container::after { display: none; }
+
+    /* 2. The Wrapper (Entity Unit) */
+    .entity-unit {
+        /* FIX: Re-enable touch events ONLY on the cards */
+        pointer-events: auto; 
+        
+        /* FIX: Explicit width matches the padding calculation (200px) */
+        width: 200px; 
+        height: auto; /* Let content dictate height */
+        
         flex-shrink: 0; 
         scroll-snap-align: center; /* Locks card to center */
+        margin-right: 0; /* Reset margins */
+    }
+
+    /* 3. The Visual Stack */
+    .entity-stack {
+        width: 100%; /* Fill the unit */
+        height: 280px; /* Fixed height for visual consistency */
     }
 
     .entity-stack-label {
         font-size: 12px;
-        top: -30px;
+        margin-top: 10px; /* Adjust spacing */
     }
 
-    /* 3. Adjust input bar for mobile */
+    /* 4. Adjust input bar for mobile */
     #ui-bar {
         width: 90%;
         bottom: 20px;
@@ -906,4 +920,5 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     .legend-item {
         padding: 5px 0; /* Easier to read on small screens */
     }
+
 }
