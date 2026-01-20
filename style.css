@@ -809,7 +809,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     /* 1. Make the container scrollable horizontally */
     #entity-deck-container {
         /* FIX: Use 100% height to prevent "black area" clipping */
-        height: 100%; 
+        pointer-events: auto;
+		height: 100%; 
         top: 0;
         transform: none; /* Remove centering transform */
         
@@ -922,3 +923,4 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     }
 
 }
+
