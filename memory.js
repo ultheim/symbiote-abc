@@ -905,13 +905,17 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                     1. DUPLICATE CHECK: Is this event already logged?
                     2. ENTITY RESOLUTION: Replace generic names with specific ones (e.g. "Mom" -> "Liliani").
                     3. CLEANUP (CRITICAL): Remove "Arvin stated/mentioned/said" prefixes. Just state the absolute fact.
-                       - BAD: "Arvin stated that Jepe is tall."
-                       - GOOD: "Jepe is tall."
+                       - BAD: "Arvin stated that Casey is tall."
+                       - GOOD: "Casey is tall."
                     4. TAG HYGIENE: Remove "Arvin" from entities UNLESS the fact is about him.
-                       - Fact: "Jepe is tall" -> Remove "Arvin" from tags.
-                       - Fact: "Arvin kissed Jepe" -> Keep "Arvin" in tags.
+                       - Fact: "Casey is tall" -> Remove "Arvin" from tags.
+                       - Fact: "Arvin kissed Casey" -> Keep "Arvin" in tags.
+                    5. TRANSIENCE CHECK (CRITICAL):
+                       - If the fact describes a TEMPORARY feeling/mood (afraid, angry, sad, nervous) about a specific moment, APPEND this note: "(Note: This is a momentary reaction to this specific event)".
+                       - BAD: "Arvin is afraid of the price."
+                       - GOOD: "Arvin is afraid of the price (Note: This is a momentary reaction to this specific event)."
                     
-                    Return JSON: 
+					Return JSON: 
                     { 
                       "status": "DUPLICATE" or "NEW",
                       "better_fact": "The refined fact (clean, no 'Arvin said')",
@@ -965,4 +969,5 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     }
 
     return { choices: [{ message: { content: generationResult.cleaned } }] };
+
 };
