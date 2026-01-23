@@ -161,29 +161,72 @@ canvas { display: block; }
 /* --- FULL TEXT DISPLAY (New) --- */
 #full-text-display {
     position: fixed;
-    top: 50%;
+    bottom: 80px; /* Anchored just above the UI Input Bar */
     left: 50%;
-    transform: translate(-50%, -60%);
-    width: 85%;
-    max-width: 700px;
-    max-height: 60vh;
-    background: rgba(10, 10, 12, 0.9);
-    border: 1px solid rgba(255, 115, 0, 0.3);
-    padding: 30px;
-    border-radius: 10px;
+    transform: translateX(-50%); /* Center Horizontally */
+    
+    width: 90%;
+    max-width: 600px;
+    height: 35vh; /* Takes up bottom 35% of screen */
+    
+    background: transparent; /* No heavy background box */
+    border: none;
+    
     z-index: 20;
-    backdrop-filter: blur(15px);
-    overflow-y: auto;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    overflow-y: auto; /* Allow scrolling */
+    
+    /* Smooth Scroll Behavior */
+    scroll-behavior: smooth;
+    
+    /* Transition for appearing/disappearing */
+    transition: opacity 0.5s ease, transform 0.5s ease;
     opacity: 1;
     pointer-events: auto;
+    
+    /* Hide Scrollbar (Clean Look) */
+    scrollbar-width: none;  /* Firefox */
+}
+
+/* Hide scrollbar for Chrome/Safari/Edge */
+#full-text-display::-webkit-scrollbar {
+    display: none;
 }
 
 #full-text-display.hidden {
     opacity: 0;
     pointer-events: none;
-    transform: translate(-50%, -55%) scale(0.95);
+    transform: translateX(-50%) translateY(20px); /* Slides down slightly when hidden */
+}
+
+#text-content {
+    /* Typography */
+    font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+    font-size: 15px;
+    line-height: 1.6;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9); /* Heavy shadow to read against boids */
+    
+    /* Layout: Pushes text to the bottom initially (Chat style) */
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 100%;
+    
+    /* Padding to account for the mask fade areas */
+    padding: 40px 10px; 
+    box-sizing: border-box;
+    text-align: left;
+    white-space: pre-wrap;
+}
+
+/* Optional: Add a little "Speaker" label styling if you include it in the text */
+#text-content strong {
+    color: #ff7300;
+    font-size: 0.9em;
+    letter-spacing: 1px;
+    display: block;
+    margin-bottom: 5px;
+    margin-top: 15px;
 }
 
 #text-content {
