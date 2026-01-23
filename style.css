@@ -161,15 +161,18 @@ canvas { display: block; }
 /* --- FULL TEXT DISPLAY (New) --- */
 #full-text-display {
     position: fixed;
-    bottom: 80px; /* Anchored just above the UI Input Bar */
+    bottom: 90px; /* Anchored just above the UI Input Bar */
     left: 50%;
     transform: translateX(-50%); /* Center Horizontally */
     
     width: 90%;
     max-width: 600px;
-    height: 35vh; /* Takes up bottom 35% of screen */
     
-    background: transparent; /* No heavy background box */
+    /* UPDATED: Dynamic height to prevent overlap with Decks */
+    height: auto;
+    max-height: 12vh; /* Restricted height (approx 20-25% of screen) */
+    
+    background: transparent; 
     border: none;
     
     z-index: 20;
@@ -183,13 +186,21 @@ canvas { display: block; }
     opacity: 1;
     pointer-events: auto;
     
-    /* Hide Scrollbar (Clean Look) */
-    scrollbar-width: none;  /* Firefox */
+    /* UPDATED: Show thin scrollbar so user knows it scrolls */
+    scrollbar-width: thin;
+    scrollbar-color: #ff7300 rgba(0,0,0,0.1);
 }
 
-/* Hide scrollbar for Chrome/Safari/Edge */
+/* UPDATED: Styled scrollbar for Chrome/Safari/Edge */
 #full-text-display::-webkit-scrollbar {
-    display: none;
+    width: 4px;
+}
+#full-text-display::-webkit-scrollbar-thumb {
+    background: #ff7300;
+    border-radius: 2px;
+}
+#full-text-display::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.1);
 }
 
 #full-text-display.hidden {
@@ -901,6 +912,28 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
         width: 90%;
         bottom: 20px;
     }
+
+    /* UPDATED: MOBILE TEXT DISPLAY FIXES */
+    /* Fix "shit" mobile view by adding readability layer & better positioning */
+    #full-text-display {
+        width: 95%;
+        bottom: 70px; /* Sit comfortably above the UI bar */
+        max-height: 20vh; /* Strict constraint to avoid Decks */
+        
+        background: rgba(0, 0, 0, 0.85); /* Dark background for readability */
+        backdrop-filter: blur(5px);
+        
+        padding: 15px; /* Add breathing room */
+        border-radius: 12px;
+        border: 1px solid rgba(255, 115, 0, 0.2);
+        
+        box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+    }
+    
+    #text-content {
+        font-size: 13px; /* Slightly smaller for info density */
+        padding: 0; /* reset inner padding */
+    }
 }
 
 /* 1. Prevent "Bounce" and page dragging while interacting with visuals */
@@ -952,4 +985,3 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     }
 
 }
-
