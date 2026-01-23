@@ -203,6 +203,12 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
           > ANAPHORA RESOLUTION: If input is "Show him" and SYSTEM NOTE says "refers to Takahiro", output ["Takahiro"].
         - "negative_constraints": Extract names/traits the user wants to EXCLUDE (e.g. "without John").
         
+		*** CRITICAL: ATOMIC STORAGE RULES (FOR "STORE" INTENT) ***
+        If the user provides a narrative or description (like a bio), you MUST SPLIT it into separate, atomic facts in the "facts" array.
+        - BAD: ["Colby is handsome and has a beard and likes to top."]
+        - GOOD: ["Colby Keller is handsome.", "Colby Keller has a scruffy beard.", "Colby Keller likes to top."]
+        - Each fact must be standalone (replace "He" with the Name).
+		
         *** FORMATTING RULES (STRICT) ***
         1. RESPONSE FIELD:
             - IF intent is "SEARCH": You MUST wrap the Entity Name in double carets: <<Name>>. 
@@ -213,7 +219,7 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
         RETURN JSON ONLY:
         {
             "intent": "STORE" or "SEARCH" or "CHAT",
-            "fact_to_store": "...", 
+            "facts": ["Fact 1", "Fact 2", "Fact 3"], 
             "entity_name": "...", 
             "positive_constraints": ["..."], 
             "negative_constraints": ["..."], 
@@ -419,22 +425,32 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
              }) } }] };
         }
 
-        // === CASE 2: STORE (FIX 5: CONTRADICTION DETECTION) ===
+        // === CASE 2: STORE (FIXED: MULTI-FACT SPLITTING) ===
         if (aiRes.intent === "STORE" && appsScriptUrl) {
-            console.group("💾 STORING FACT");
+            console.group("💾 STORING FACT(S)");
             
-            let isDuplicate = false;
-            let isContradiction = false;
-            let contradictionWarning = "";
-            let lookupKeys = [];
+            // 1. Normalize Input: specific "facts" array OR legacy "fact_to_store" string
+            const factsToProcess = (Array.isArray(aiRes.facts) && aiRes.facts.length > 0) 
+                ? aiRes.facts 
+                : (aiRes.fact_to_store ? [aiRes.fact_to_store] : []);
 
-            if (aiRes.entity_name) lookupKeys.push(aiRes.entity_name);
-            if (aiRes.positive_constraints) lookupKeys = lookupKeys.concat(aiRes.positive_constraints);
-            if (lookupKeys.length === 0 && aiRes.fact_to_store) lookupKeys = aiRes.fact_to_store.match(/[A-Z][a-z]+/g) || [];
-            lookupKeys = [...new Set(lookupKeys)].filter(k => k && k.length > 1);
+            let responses = [];
 
-            try {
-                if (lookupKeys.length > 0) {
+            // 2. Loop through every fact found in the paragraph
+            for (const singleFact of factsToProcess) {
+                console.log(`Processing fact: "${singleFact}"`);
+                
+                let isDuplicate = false;
+                let isContradiction = false;
+                let contradictionWarning = "";
+                
+                // --- DEDUPLICATION CHECK (Per Fact) ---
+                try {
+                    // Reuse your existing key extraction logic for this specific fact
+                    let lookupKeys = [aiRes.entity_name];
+                    const factKeywords = singleFact.match(/[A-Z][a-z]+/g) || [];
+                    lookupKeys = [...new Set([...lookupKeys, ...factKeywords])].filter(k => k && k.length > 1);
+
                     const checkReq = await fetch(appsScriptUrl, {
                         method: "POST", 
                         headers: { "Content-Type": "text/plain" },
@@ -444,70 +460,62 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
 
                     if (checkRes.found && checkRes.relevant_memories.length > 0) {
                          const existingFacts = checkRes.relevant_memories.map(m => `[${m.Entity || 'Unknown'}] ${m.Fact}`).join("\n");
-                         console.log("   ➤ Existing Database Matches:", existingFacts);
-
+                         
                          const dedupPrompt = `
                          EXISTING LOGS:
                          ${existingFacts}
                          
-                         NEW FACT: "${aiRes.fact_to_store}" (Entity: ${aiRes.entity_name})
+                         NEW FACT: "${singleFact}" (Entity: ${aiRes.entity_name})
                          
                          TASK: Check for DUPLICATES and CONTRADICTIONS.
-                         
-                         1. DUPLICATE: Does the new fact already exist?
-                         2. CONTRADICTION: Does the new fact logically conflict with an existing one?
-                            - Ex: "Brent is retired" vs "Brent is filming new scene".
-                            
-                         RETURN JSON: 
-                         { 
-                            "is_duplicate": boolean, 
-                            "is_contradiction": boolean,
-                            "warning_message": "String warning user about the conflict (if contradiction)"
-                         }
+                         RETURN JSON: { "is_duplicate": boolean, "is_contradiction": boolean, "warning_message": "..." }
                          `;
                          
                          const dedupCheck = await fetchWithCognitiveRetry(
                             [{ "role": "system", "content": dedupPrompt }],
                             modelHigh, apiKey, (d) => typeof d.is_duplicate === 'boolean', "DirectorDedup"
                          );
-                        
-                         if (dedupCheck.parsed.is_duplicate) {
-                             console.warn("🛑 DUPLICATE INTERCEPTED.");
-                             isDuplicate = true;
-                         }
+                         
+                         if (dedupCheck.parsed.is_duplicate) isDuplicate = true;
                          if (dedupCheck.parsed.is_contradiction) {
-                             console.warn("⚠️ CONTRADICTION DETECTED.");
                              isContradiction = true;
                              contradictionWarning = dedupCheck.parsed.warning_message;
                          }
                     }
+                } catch(e) { console.warn("Dedup check failed for:", singleFact, e); }
+
+                // --- ACTION HANDLING ---
+                if (isDuplicate) {
+                    console.log(`Skipping duplicate: ${singleFact}`);
+                    continue; // Skip this fact, move to next
                 }
-            } catch(e) { console.warn("Dedup/Contradiction check failed.", e); }
 
-            console.groupEnd(); 
-
-            if (isDuplicate) {
-                return { choices: [{ message: { content: JSON.stringify({ 
-                    response: "I already have that recorded in the archives.", mood: "NEUTRAL" 
-                }) } }] };
+                if (isContradiction) {
+                    // For contradictions in a batch, we usually just warn and stop, 
+                    // or you can choose to store it anyway.
+                    responses.push(`⚠️ Conflict: ${contradictionWarning}`);
+                } else {
+                    // Store the individual fact
+                    await fetch(appsScriptUrl, { 
+                        method: "POST", body: JSON.stringify({ 
+                            action: "store_director_fact", 
+                            fact: singleFact, // Storing the split fact
+                            entity: aiRes.entity_name,
+                            tags: "Metadata"
+                        }) 
+                    });
+                    responses.push("Saved.");
+                }
             }
             
-            if (isContradiction) {
-                return { choices: [{ message: { content: JSON.stringify({ 
-                    response: `${contradictionWarning} Shall I overwrite the old data?`, mood: "QUESTION" 
-                }) } }] };
-            }
+            console.groupEnd(); 
 
-            // Proceed to Store
-             fetch(appsScriptUrl, { 
-                method: "POST", body: JSON.stringify({ 
-                    action: "store_director_fact", 
-                    fact: aiRes.fact_to_store,
-                    entity: aiRes.entity_name,
-                    tags: "Metadata"
-                }) 
-            });
-            return { choices: [{ message: { content: JSON.stringify({ response: aiRes.response || "Database Updated." }) } }] };
+            // Summarize the batch operation for the user
+            const finalResponse = responses.some(r => r.includes("Conflict")) 
+                ? "Some facts conflicted with existing records. Check console." 
+                : (aiRes.response || "Database Updated.");
+
+            return { choices: [{ message: { content: JSON.stringify({ response: finalResponse }) } }] };
         }
         
         // === CASE 3: SEARCH (FIX 1 & 4: COOPERATIVE FALLBACK & EXCLUSIONS) ===
