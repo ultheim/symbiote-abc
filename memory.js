@@ -189,37 +189,25 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
         TASK 1: ANALYZE INTENT
         - Is the user defining a fact? (e.g. "Cody is the tall guy") -> STORE
         - Is the user asking for footage? (e.g. "Show me...", "Play...", "Pull up...") -> SEARCH
-        - Is the user asking for a RECOMMENDATION or LIST? (e.g. "Any similar guys?", "Do you have anyone like X?", "Who else is there?") -> CHAT
-        - Is the user asking for an OPINION/DESCRIPTION? (e.g. "Who is Brent?", "Tell me about him") -> CHAT 
-        - Is the user rejecting/cancelling? -> CHAT
-        - Is it just chit-chat? -> CHAT
-        
-        CRITICAL: Default to "CHAT" if the user uses vague words like "Any", "Similar", "Like", or "Recommend". Only use "SEARCH" for explicit commands or specific names.
+        - Is the user asking for a RECOMMENDATION, LIST, RANKING, or COMPARISON? -> CHAT
+        - Is the user asking for an OPINION/DESCRIPTION? (e.g. "Who is Brent?") -> CHAT 
         
         TASK 2: RESOLVE ENTITIES & CLEAN KEYWORDS (CRITICAL)
         - "positive_constraints": Extract ALL names, entities, OR DEMOGRAPHICS mentioned. 
           > Example: "Any Asian guys?" -> ["Asian", "guys"]
-          > Example: "Similar white performers" -> ["White", "performers"]
-          > ANAPHORA RESOLUTION: If input is "Show him" and SYSTEM NOTE says "refers to Takahiro", output ["Takahiro"].
-        - "negative_constraints": Extract names/traits the user wants to EXCLUDE (e.g. "without John").
-        
-		*** CRITICAL: ATOMIC STORAGE RULES (FOR "STORE" INTENT) ***
-        If the user provides a narrative or description (like a bio), you MUST SPLIT it into separate, atomic facts in the "facts" array.
-        - BAD: ["Colby is handsome and has a beard and likes to top."]
-        - GOOD: ["Colby Keller is handsome.", "Colby Keller has a scruffy beard.", "Colby Keller likes to top."]
-        - Each fact must be standalone (replace "He" with the Name).
-		
-        *** FORMATTING RULES (STRICT) ***
-        1. RESPONSE FIELD:
-            - IF intent is "SEARCH": You MUST wrap the Entity Name in double carets: <<Name>>. 
-            - IF intent is "STORE": Do NOT use carets. Write the name in plain text.
-            - IF intent is "CHAT": Do not hallucinate facts.
-        2. DATA FIELDS (fact_to_store, entity_name): Do NOT use carets. Keep text clean.
+          
+          *** CONTEXT EXPANSION RULE (CRITICAL) ***
+          If the user asks for a RANKING ("Top 3"), A LIST ("Who do you have?"), or a COMPARISON/SIMILARITY ("Who is like Colby?"), you MUST add generic broad terms (["Actor", "Entity", "Person"]) to 'positive_constraints'.
+          - Query: "Who is like Colby?" -> positive_constraints: ["Colby Keller", "Actor", "Entity"]
+          - Query: "Top 3 guys" -> positive_constraints: ["Actor", "Entity", "Guy"]
+          - REASONING: This ensures the database retrieves the full roster to compare against, not just the single subject mentioned.
+
+        - "negative_constraints": Extract names/traits the user wants to EXCLUDE.
         
         RETURN JSON ONLY:
         {
             "intent": "STORE" or "SEARCH" or "CHAT",
-            "facts": ["Fact 1", "Fact 2", "Fact 3"], 
+            "facts": ["Fact 1", "Fact 2"], 
             "entity_name": "...", 
             "positive_constraints": ["..."], 
             "negative_constraints": ["..."], 
@@ -238,9 +226,9 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
         console.log(`   ➤ Keywords:`, aiRes.positive_constraints);
         console.log(`   ➤ Excludes:`, aiRes.negative_constraints);
         
-        // === CASE 1: CHAT/OPINION (FIXED: SMART BATCHING + AUTO-DECKS) ===
+        // === CASE 1: CHAT/OPINION (FIXED: FALLBACK RESPONSE ENABLED) ===
         if (aiRes.intent === "CHAT") {
-             
+		
              if (aiRes.positive_constraints && aiRes.positive_constraints.length > 0 && appsScriptUrl) {
                  console.group("💬 CHAT CONTEXT RETRIEVAL (RAG)");
                  console.log(`   ➤ Primary Search: ${aiRes.positive_constraints}`);
@@ -309,8 +297,6 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                         const facts = allMemories.map(m => `[${m.Entity}]: ${m.Fact}`).join("\n");
                         console.log("   ➤ Filtering for Relevance (with Context)...");
                         
-                        // memory.js
-
                         const filterPrompt = `
                         CONTEXT (PREVIOUS CHAT):
                         ${historyText.slice(-600)}
@@ -364,6 +350,11 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                         ARCHIVE DATA (FACTS):
                         ${facts}
                         
+						*** STRICT GROUNDING RULES ***
+                        1. NO OUTSIDE KNOWLEDGE: You are a database interface. You do NOT know famous people unless they are in "ARCHIVE DATA".
+                        2. MISSING DATA: If the user asks about "Brent" but "Brent" is not in ARCHIVE DATA, you must say: "I have no records for Brent."
+                        3. COMPARISONS: If comparing two people (e.g. Colby vs Brent) and one is missing, describe the one you have and explicitly state the other is missing.
+						
                         TASK: Answer the user naturally.
                         - IF VALID MATCHES ARE EMPTY: Say "I couldn't find anyone matching that description in the archive." DO NOT HALLUCINATE NAMES.
                         - IF DIRECT QUESTION (e.g. "Who is Brent?"): Just describe Brent.
@@ -416,13 +407,44 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                  console.groupEnd();
              }
 
-             console.log("💬 Action: CHAT (No Data Found / No Subject)");
+             console.log("💬 Action: CHAT (General Conversation / No Extraction)");
              console.groupEnd(); 
              
-             return { choices: [{ message: { content: JSON.stringify({ 
-                 response: "I need more specific names or traits to search the archive.", 
-                 mood: "CRYPTIC" 
-             }) } }] };
+             // === CRITICAL FIX: USE AI INTENT RESPONSE AS FALLBACK ===
+             const fallbackResponse = (aiRes.response && aiRes.response.length > 2) 
+                ? aiRes.response 
+                : "I need more specific names or traits to search the archive.";
+
+             // === NEW: FALLBACK VISUAL TRIGGER ===
+             // If the AI didn't trigger a search but the user mentioned a Name (Capitalized), 
+             // we force the decks to appear for that name.
+             let extraFallbackPayload = {};
+             
+             // Simple Regex to find Title Case words (potential names) in user input
+             // Excludes common sentence starters to avoid triggering decks for "Who" or "The"
+             const stopWords = ["Tell", "Me", "About", "Who", "Is", "What", "Where", "When", "How", "Why", "The", "A", "An", "And", "Or", "But", "No", "Yes", "Compare", "Him", "Her", "Them", "With", "Any", "Guys"];
+             
+             const potentialNames = userText.match(/[A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?/g);
+             
+             if (potentialNames) {
+                 const cleanDecks = potentialNames.filter(w => !stopWords.includes(w) && w.length > 2);
+                 
+                 if (cleanDecks.length > 0) {
+                     console.log(`   🃏 Fallback Deck Trigger: ${cleanDecks}`);
+                     extraFallbackPayload = {
+                         directorAction: "SHOW_DECKS",
+                         deckKeywords: cleanDecks
+                     };
+                 }
+             }
+
+             return { 
+                 ...extraFallbackPayload,
+                 choices: [{ message: { content: JSON.stringify({ 
+                     response: fallbackResponse, 
+                     mood: "CRYPTIC" 
+                 }) } }] 
+             };
         }
 
         // === CASE 2: STORE (FIXED: MULTI-FACT SPLITTING) ===
