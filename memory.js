@@ -152,46 +152,72 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     const today = new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' });
 
     // ============================================
-    // 🎬 DIRECTOR MODE BRANCH
+    // 🎬 DIRECTOR MODE BRANCH (FIXED: DEMOGRAPHIC KEYWORDS & SAFETY)
     // ============================================
     if (isDirectorMode) {
-        console.log("🎬 Processing in Director Mode...");
+        console.group("🎬 DIRECTOR MODE SESSION"); // START LOG GROUP
 
-        // --- UPDATE 1: ADDED HISTORY CONTEXT TO PROMPT ---
+        // --- FIX 2 & 3: ANAPHORA & INTENT BRIDGING (PRE-PROCESSING) ---
+        let bridgeContext = "";
+        const isShortQuery = userText.split(" ").length < 5;
+        const hasPronouns = /\b(he|him|she|her|it|them|that|those)\b/i.test(userText);
+        
+        if (isShortQuery || hasPronouns) {
+            const lastAssistantMsg = history.filter(h => h.role === "assistant").pop();
+            if (lastAssistantMsg) {
+                const possibleEntities = lastAssistantMsg.content.match(/[A-Z][a-zA-Z]+/g);
+                if (possibleEntities) {
+                    const cleanEntities = possibleEntities.filter(w => !["The", "A", "An", "I", "He", "She", "It", "They", "We", "Who", "What", "Where", "When"].includes(w));
+                    if (cleanEntities.length > 0) {
+                        bridgeContext = `\n[SYSTEM NOTE: User pronoun/short command likely refers to these entities from previous turn: ${cleanEntities.join(", ")}]`;
+                        console.log("🌉 Intent Bridge Built:", cleanEntities);
+                    }
+                }
+            }
+        }
+
         const directorSystemPrompt = `
         YOU ARE THE ARCHIVIST. 
-        User is the Director. You have access to a video archive.
+        User is the Director. You have access to a video archive (Google Sheets/Drive).
         
         CONTEXT (RECENT CHAT):
-        ${historyText.slice(-600)}
+        ${historyText.slice(-800)}
+        ${bridgeContext}
         
         CURRENT INPUT: "${userText}"
         
         TASK 1: ANALYZE INTENT
         - Is the user defining a fact? (e.g. "Cody is the tall guy") -> STORE
-        - Is the user asking for footage? (e.g. "Show me Cody") -> SEARCH
-        - Is the user ANSWERING a clarification question? (e.g. AI asked "Who?", User says "The hot one") -> SEARCH
-        - Is the user rejecting/cancelling? (e.g. "None", "Neither") -> CHAT
+        - Is the user asking for footage? (e.g. "Show me...", "Play...", "Pull up...") -> SEARCH
+        - Is the user asking for a RECOMMENDATION or LIST? (e.g. "Any similar guys?", "Do you have anyone like X?", "Who else is there?") -> CHAT
+        - Is the user asking for an OPINION/DESCRIPTION? (e.g. "Who is Brent?", "Tell me about him") -> CHAT 
+        - Is the user rejecting/cancelling? -> CHAT
         - Is it just chit-chat? -> CHAT
         
+        CRITICAL: Default to "CHAT" if the user uses vague words like "Any", "Similar", "Like", or "Recommend". Only use "SEARCH" for explicit commands or specific names.
+        
         TASK 2: RESOLVE ENTITIES & CLEAN KEYWORDS (CRITICAL)
-        - Extract the specific traits or names the user is using to identify the subject.
+        - "positive_constraints": Extract ALL names, entities, OR DEMOGRAPHICS mentioned. 
+          > Example: "Any Asian guys?" -> ["Asian", "guys"]
+          > Example: "Similar white performers" -> ["White", "performers"]
+          > ANAPHORA RESOLUTION: If input is "Show him" and SYSTEM NOTE says "refers to Takahiro", output ["Takahiro"].
+        - "negative_constraints": Extract names/traits the user wants to EXCLUDE (e.g. "without John").
         
         *** FORMATTING RULES (STRICT) ***
         1. RESPONSE FIELD:
-			- IF intent is "SEARCH": You MUST wrap the Entity Name in double carets: <<Name>>. (This shows the images).
-			- IF intent is "STORE": Do NOT use carets. Write the name in plain text (e.g. "Trenton stored").
+            - IF intent is "SEARCH": You MUST wrap the Entity Name in double carets: <<Name>>. 
+            - IF intent is "STORE": Do NOT use carets. Write the name in plain text.
+            - IF intent is "CHAT": Do not hallucinate facts.
         2. DATA FIELDS (fact_to_store, entity_name): Do NOT use carets. Keep text clean.
-           - BAD: "<<Brent>> is white"
-           - GOOD: "Brent is white"
         
         RETURN JSON ONLY:
         {
             "intent": "STORE" or "SEARCH" or "CHAT",
-            "fact_to_store": "...", (If intent is STORE. NO BRACKETS.)
-            "entity_name": "...", (If known. NO BRACKETS.)
-            "search_keywords": ["..."], (Traits or Names)
-            "response": "..." (Brief confirmation. Use <<Name>> here.)
+            "fact_to_store": "...", 
+            "entity_name": "...", 
+            "positive_constraints": ["..."], 
+            "negative_constraints": ["..."], 
+            "response": "..." 
         }
         `;
 
@@ -201,97 +227,278 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
         );
         aiRes = aiRes.parsed;
         
-        // === 🕵️ SPY LOG: WHAT DID THE AI THINK? ===
-        console.group("🎬 DIRECTOR MODE DEBUG");
-        console.log("1. User Input:", userText);
-        console.log("2. AI Intent:", aiRes.intent);
-        console.log("3. Resolved Keywords:", aiRes.search_keywords);
-        console.groupEnd();
-        // ==========================================
+        console.log(`🧠 AI INTENT: [${aiRes.intent}]`);
+        console.log(`   ➤ Input: "${userText}"`);
+        console.log(`   ➤ Keywords:`, aiRes.positive_constraints);
+        console.log(`   ➤ Excludes:`, aiRes.negative_constraints);
         
-        if (aiRes.intent === "STORE" && appsScriptUrl) {
-            // 1. DEDUPLICATION CHECK: Fetch existing logs
-            let isDuplicate = false;
-            
-            // --- ROBUST LOOKUP GENERATION ---
-            let lookupKeys = [];
-
-            // [FIX] Priority 1: Always include the Entity Name (The Subject)
-            if (aiRes.entity_name) {
-                lookupKeys.push(aiRes.entity_name);
-            }
-
-            // [FIX] Priority 2: Append AI Keywords (The Attributes)
-            if (aiRes.search_keywords && Array.isArray(aiRes.search_keywords)) {
-                lookupKeys = lookupKeys.concat(aiRes.search_keywords);
-            }
-            
-            // Priority 3: Fallback to Fact Text if both above failed
-            if (lookupKeys.length === 0 && aiRes.fact_to_store) {
-                 lookupKeys = aiRes.fact_to_store.match(/[A-Z][a-z]+/g) || [];
-            }
-
-            // Clean: Remove duplicates and empty strings
-            lookupKeys = [...new Set(lookupKeys)].filter(k => k && k.length > 1);
-
-            try {
-                console.log(`🧐 Director Dedup: Looking up [${lookupKeys}]`);
-                
-                // Only proceed if we actually have keys
-                if (lookupKeys.length > 0) {
-                    const checkReq = await fetch(appsScriptUrl, {
+        // === CASE 1: CHAT/OPINION (FIXED: SMART BATCHING + AUTO-DECKS) ===
+        if (aiRes.intent === "CHAT") {
+             
+             if (aiRes.positive_constraints && aiRes.positive_constraints.length > 0 && appsScriptUrl) {
+                 console.group("💬 CHAT CONTEXT RETRIEVAL (RAG)");
+                 console.log(`   ➤ Primary Search: ${aiRes.positive_constraints}`);
+                 
+                 try {
+                     const contextReq = await fetch(appsScriptUrl, {
                         method: "POST", 
                         headers: { "Content-Type": "text/plain" },
                         body: JSON.stringify({ 
                             action: "retrieve_director_memory", 
-                            keywords: lookupKeys 
+                            keywords: aiRes.positive_constraints 
                         })
+                    });
+                    const contextRes = await contextReq.json();
+                    
+                    let allMemories = [];
+                    let foundEntities = new Set();
+
+                    if (contextRes.found && contextRes.relevant_memories.length > 0) {
+                        allMemories = contextRes.relevant_memories;
+                        
+                        allMemories.forEach(m => {
+                            if (m.Entity) foundEntities.add(m.Entity);
+                        });
+                        console.log("   ➤ Entities Discovered:", Array.from(foundEntities));
+
+                        // --- FIX 6: SMART BATCH COMPARISON ---
+                        let drillDownTargets = Array.from(foundEntities).filter(e => {
+                            return !aiRes.positive_constraints.includes(e);
+                        });
+
+                        // Prioritize entities matching traits in initial memory
+                        drillDownTargets.sort((a, b) => {
+                            const memA = allMemories.find(m => m.Entity === a)?.Fact || "";
+                            const memB = allMemories.find(m => m.Entity === b)?.Fact || "";
+                            const scoreA = aiRes.positive_constraints.some(k => memA.toLowerCase().includes(k.toLowerCase())) ? 1 : 0;
+                            const scoreB = aiRes.positive_constraints.some(k => memB.toLowerCase().includes(k.toLowerCase())) ? 1 : 0;
+                            return scoreB - scoreA; 
+                        });
+
+                        drillDownTargets = drillDownTargets.slice(0, 15); 
+
+                        if (drillDownTargets.length > 0) {
+                            console.log(`   ➤ 🔍 DRILL-DOWN Triggered for: ${drillDownTargets}`);
+                            const drillReq = await fetch(appsScriptUrl, {
+                                method: "POST", 
+                                headers: { "Content-Type": "text/plain" },
+                                body: JSON.stringify({ 
+                                    action: "retrieve_director_memory", 
+                                    keywords: drillDownTargets 
+                                })
+                            });
+                            const drillRes = await drillReq.json();
+                            if (drillRes.found && drillRes.relevant_memories.length > 0) {
+                                console.log(`   ➤ Drill-Down Results: ${drillRes.relevant_memories.length} new facts.`);
+                                const existingIds = new Set(allMemories.map(m => m.Fact));
+                                drillRes.relevant_memories.forEach(m => {
+                                    if (!existingIds.has(m.Fact)) {
+                                        allMemories.push(m);
+                                    }
+                                });
+                            }
+                        }
+
+                        // CONTEXT-AWARE FILTER
+                        const facts = allMemories.map(m => `[${m.Entity}]: ${m.Fact}`).join("\n");
+                        console.log("   ➤ Filtering for Relevance (with Context)...");
+                        
+                        // memory.js
+
+                        const filterPrompt = `
+                        CONTEXT (PREVIOUS CHAT):
+                        ${historyText.slice(-600)}
+
+                        CURRENT USER REQUEST: "${userText}"
+                        
+                        ARCHIVE DATA (CANDIDATES):
+                        ${facts}
+                        
+                        TASK: Select the Entities that answer the request.
+                        
+                        *** FILTERING RULES ***
+                        1. AGGREGATE EVIDENCE (CRITICAL):
+                           - You must COMBINE all facts for a specific Entity to see if they meet the criteria.
+                           - Example: If Fact 1 says "Brent is White" and Fact 2 says "Brent shows off his pits", then Brent matches "White guys with pits".
+                           - Do NOT reject a candidate just because the traits are in separate database entries.
+                        
+                        2. SEMANTIC MATCHING:
+                           - "White" matches: Caucasian, Pale, Euro, etc.
+                           - "Armpits" matches: Pits, Underarms, Musk, Hair, Sweat.
+                           - "Hot" matches: Sexy, Nice, Worship, Hairy, Smooth, Great.
+                        
+                        3. STRICT INTERSECTION:
+                           - The entity must possess ALL requested traits (Demographic AND Feature) across their aggregated facts.
+                           - If an entity matches the demographic (e.g. White) but has NO evidence of the feature (e.g. Armpits) in ANY of their facts, REJECT them.
+                        
+                        RETURN JSON: 
+                        { 
+                            "matches": ["Name1", "Name2"], 
+                            "reasoning": "Brief explanation." 
+                        }
+                        `;
+
+                        const filterCheck = await fetchWithCognitiveRetry(
+                            [{ "role": "system", "content": filterPrompt }],
+                            modelHigh, apiKey, (d) => Array.isArray(d.matches), "DirectorFilter"
+                        );
+
+                        const validMatches = filterCheck.parsed.matches || [];
+                        console.log(`   ➤ 🎯 Filtered Matches: ${validMatches.join(", ")}`);
+
+                        // GENERATE ANSWER
+                        const contextPrompt = `
+                        You are the Archivist.
+                        CONTEXT (PREVIOUS CHAT):
+                        ${historyText.slice(-300)}
+                        
+                        USER ASKED: "${userText}"
+                        VALID MATCHES: ${validMatches.join(", ")}
+                        
+                        ARCHIVE DATA (FACTS):
+                        ${facts}
+                        
+                        TASK: Answer the user naturally.
+                        - IF VALID MATCHES ARE EMPTY: Say "I couldn't find anyone matching that description in the archive." DO NOT HALLUCINATE NAMES.
+                        - IF DIRECT QUESTION (e.g. "Who is Brent?"): Just describe Brent.
+                        - IF COMPARISON (e.g. "What about white?"): List the matches and briefly mention the traits they share with the *previous subject*. 
+                        - NO META-TALK: Never explain "I selected these because...".
+                        
+                        RETURN JSON: { "response": "...", "mood": "CRYPTIC" }
+                        `;
+                        
+                        const secondPass = await fetchWithCognitiveRetry(
+                             [{ "role": "system", "content": contextPrompt }],
+                             modelHigh, apiKey, (d) => d.response, "DirectorContextChat"
+                        );
+                        
+                        console.log("   ➤ Response:", secondPass.parsed.response);
+                        console.groupEnd();
+                        console.groupEnd(); 
+
+                        // [NEW] LOGIC: VISUAL DECK RETRIEVAL
+                        let extraPayload = {};
+                        if (validMatches.length > 0) {
+                            extraPayload = {
+                                directorAction: "SHOW_DECKS",
+                                deckKeywords: validMatches
+                            };
+                            console.log(`   🃏 Triggering Decks for: ${validMatches}`);
+                        }
+
+                        return { 
+                            ...extraPayload, 
+                            choices: [{ message: { content: JSON.stringify({ 
+                                 response: secondPass.parsed.response, 
+                                 mood: "CRYPTIC" 
+                            }) } }] 
+                        };
+
+                    } else {
+                        console.log("   ➤ No facts found.");
+                        console.groupEnd();
+                        console.groupEnd();
+                        // FALLBACK: Don't use the initial hallucination. Be honest.
+                        return { choices: [{ message: { content: JSON.stringify({ 
+                             response: `I searched the archives for ${aiRes.positive_constraints.join(', ')} but found no records.`, 
+                             mood: "SAD" 
+                        }) } }] };
+                    }
+                 } catch (e) {
+                     console.warn("Chat Lookup Failed", e);
+                 }
+                 console.groupEnd();
+             }
+
+             console.log("💬 Action: CHAT (No Data Found / No Subject)");
+             console.groupEnd(); 
+             
+             return { choices: [{ message: { content: JSON.stringify({ 
+                 response: "I need more specific names or traits to search the archive.", 
+                 mood: "CRYPTIC" 
+             }) } }] };
+        }
+
+        // === CASE 2: STORE (FIX 5: CONTRADICTION DETECTION) ===
+        if (aiRes.intent === "STORE" && appsScriptUrl) {
+            console.group("💾 STORING FACT");
+            
+            let isDuplicate = false;
+            let isContradiction = false;
+            let contradictionWarning = "";
+            let lookupKeys = [];
+
+            if (aiRes.entity_name) lookupKeys.push(aiRes.entity_name);
+            if (aiRes.positive_constraints) lookupKeys = lookupKeys.concat(aiRes.positive_constraints);
+            if (lookupKeys.length === 0 && aiRes.fact_to_store) lookupKeys = aiRes.fact_to_store.match(/[A-Z][a-z]+/g) || [];
+            lookupKeys = [...new Set(lookupKeys)].filter(k => k && k.length > 1);
+
+            try {
+                if (lookupKeys.length > 0) {
+                    const checkReq = await fetch(appsScriptUrl, {
+                        method: "POST", 
+                        headers: { "Content-Type": "text/plain" },
+                        body: JSON.stringify({ action: "retrieve_director_memory", keywords: lookupKeys })
                     });
                     const checkRes = await checkReq.json();
 
                     if (checkRes.found && checkRes.relevant_memories.length > 0) {
-                         // Extract facts with context
                          const existingFacts = checkRes.relevant_memories.map(m => `[${m.Entity || 'Unknown'}] ${m.Fact}`).join("\n");
-                         console.log("🧐 Found existing logs for comparison:", existingFacts);
+                         console.log("   ➤ Existing Database Matches:", existingFacts);
 
                          const dedupPrompt = `
-                         EXISTING DATABASE LOGS:
+                         EXISTING LOGS:
                          ${existingFacts}
                          
-                         NEW FACT TO STORE: "${aiRes.fact_to_store}" (Entity: ${aiRes.entity_name})
+                         NEW FACT: "${aiRes.fact_to_store}" (Entity: ${aiRes.entity_name})
                          
-                         TASK: Strict Duplicate Check.
-                         - Does the "NEW FACT" contain information that is ALREADY present in the "EXISTING LOGS"?
-                         - "Brent is white" vs "Brent is white" -> TRUE (Duplicate).
-                         - "Brent is white" vs "Brent is tall" -> FALSE (New info).
-                         - "The guy is white" vs "Brent is white" -> TRUE (Duplicate, if Entity matches).
+                         TASK: Check for DUPLICATES and CONTRADICTIONS.
                          
-                         Return JSON: { "is_duplicate": boolean }
+                         1. DUPLICATE: Does the new fact already exist?
+                         2. CONTRADICTION: Does the new fact logically conflict with an existing one?
+                            - Ex: "Brent is retired" vs "Brent is filming new scene".
+                            
+                         RETURN JSON: 
+                         { 
+                            "is_duplicate": boolean, 
+                            "is_contradiction": boolean,
+                            "warning_message": "String warning user about the conflict (if contradiction)"
+                         }
                          `;
                          
                          const dedupCheck = await fetchWithCognitiveRetry(
                             [{ "role": "system", "content": dedupPrompt }],
                             modelHigh, apiKey, (d) => typeof d.is_duplicate === 'boolean', "DirectorDedup"
                          );
-
+                        
                          if (dedupCheck.parsed.is_duplicate) {
-                             console.log("🚫 Director Mode: Duplicate fact intercepted.");
+                             console.warn("🛑 DUPLICATE INTERCEPTED.");
                              isDuplicate = true;
                          }
-                    } else {
-                        console.log("🧐 No existing logs found for these keywords.");
+                         if (dedupCheck.parsed.is_contradiction) {
+                             console.warn("⚠️ CONTRADICTION DETECTED.");
+                             isContradiction = true;
+                             contradictionWarning = dedupCheck.parsed.warning_message;
+                         }
                     }
                 }
-            } catch(e) { console.warn("Director Deduplication check failed, proceeding to store.", e); }
+            } catch(e) { console.warn("Dedup/Contradiction check failed.", e); }
+
+            console.groupEnd(); 
 
             if (isDuplicate) {
                 return { choices: [{ message: { content: JSON.stringify({ 
-                    response: "I already have that recorded in the archives.", 
-                    mood: "NEUTRAL" 
+                    response: "I already have that recorded in the archives.", mood: "NEUTRAL" 
+                }) } }] };
+            }
+            
+            if (isContradiction) {
+                return { choices: [{ message: { content: JSON.stringify({ 
+                    response: `${contradictionWarning} Shall I overwrite the old data?`, mood: "QUESTION" 
                 }) } }] };
             }
 
-            // 2. PROCEED TO STORE (Only if unique)
+            // Proceed to Store
              fetch(appsScriptUrl, { 
                 method: "POST", body: JSON.stringify({ 
                     action: "store_director_fact", 
@@ -303,119 +510,96 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
             return { choices: [{ message: { content: JSON.stringify({ response: aiRes.response || "Database Updated." }) } }] };
         }
         
+        // === CASE 3: SEARCH (FIX 1 & 4: COOPERATIVE FALLBACK & EXCLUSIONS) ===
         else if (aiRes.intent === "SEARCH" && appsScriptUrl) {
-            let finalKeywords = aiRes.search_keywords;
+            console.group("🔎 SEARCH SEQUENCE");
+            
+            let finalKeywords = aiRes.positive_constraints || [];
+            let excludeKeywords = aiRes.negative_constraints || [];
 
-            // =========================================================
-            // 🕵️ INTERACTIVE CLARIFICATION LOOP (SOURCE FIX)
-            // =========================================================
+            // 1. Ambiguity Check (Standard)
+            if (finalKeywords.length > 0) {
+                const identityReq = await fetch(appsScriptUrl, {
+                    method: "POST", headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify({ action: "retrieve_director_memory", keywords: finalKeywords })
+                });
+                const identityRes = await identityReq.json();
 
-            const hasProperName = finalKeywords.some(k => /^[A-Z]/.test(k)); 
+                if (identityRes.found && identityRes.relevant_memories.length > 0) {
+                    const memories = identityRes.relevant_memories.map(m => typeof m === 'object' ? `${m.Entity}: ${m.Fact}` : m).join("\n");
+                    const ambiguityPrompt = `
+                    USER REQUEST: "${userText}"
+                    TARGETS: ${finalKeywords.join(", ")}
+                    DATABASE: ${memories}
+                    TASK: Check for Ambiguity (Multiple people same name) or Resolution.
+                    RETURN JSON: { "status": "RESOLVED"|"AMBIGUOUS", "clarification_question": "...", "resolved_names": [], "resolved_excludes": [] }
+                    `;
+                    const ambiguityCheck = await fetchWithCognitiveRetry(
+                        [{ "role": "system", "content": ambiguityPrompt }],
+                        modelHigh, apiKey, (d) => d.status, "DirectorAmbiguity"
+                    );
 
-            if (!hasProperName && finalKeywords.length > 0) {
-                console.log("🕵️ DIRECTOR: Description detected. Checking DIRECTOR LOGS...");
-
-                // A. ROBUST CLEANING
-                const stopList = ["guys", "guy", "man", "men", "people", "show", "me", "video", "clip", "watch", "looking", "for", "the", "one"];
-                const cleanKeywords = finalKeywords
-                    .flatMap(k => k.split(" ")) 
-                    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, "")) 
-                    .filter(w => !stopList.includes(w) && w.length > 2); 
-
-                console.log("🧹 Cleaned Search Terms:", cleanKeywords);
-
-                if (cleanKeywords.length > 0) {
-                    
-                    // --- CRITICAL FIX: TARGET THE DIRECTOR SHEET ---
-                    const identityReq = await fetch(appsScriptUrl, {
-                        method: "POST", 
-                        headers: { "Content-Type": "text/plain" },
-                        body: JSON.stringify({ 
-                            action: "retrieve_director_memory", 
-                            keywords: cleanKeywords 
-                        })
-                    });
-                    const identityRes = await identityReq.json();
-                    
-                    console.log("🧠 DIRECTOR LOG RAW:", identityRes); 
-
-                    if (identityRes.found && identityRes.relevant_memories.length > 0) {
-                        
-                        const memories = identityRes.relevant_memories.map(m => {
-                            if (typeof m === 'object') return `${m.Entity}: ${m.Fact}`;
-                            return m;
-                        }).join("\n");
-                        
-                        console.log("📝 Context for AI:", memories); 
-
-                        // C. ASK AI: WHO FITS?
-                        const clarificationPrompt = `
-                        USER INPUT: "${userText}"
-                        FILTERED TRAITS: ${cleanKeywords.join(", ")}
-                        DIRECTOR LOGS FOUND: 
-                        ${memories}
-                        
-                        TASK: The user is selecting a person based on a trait.
-                        Does any name/entity in the logs have the trait "${cleanKeywords.join(' ')}"?
-                        
-                        - If "Kasai Yuto" is "hot" or "tanned", that is a MATCH.
-                        
-                        RETURN JSON ONLY:
-						- { "status": "MATCH", "content": "Entity Name Only" }
-						- { "status": "OPTIONS", "content": "<<Name1>>, <<Name2>>" }
-						- { "status": "UNKNOWN", "content": "" }
-						`;
-                        
-                        const clarCheck = await fetchWithCognitiveRetry(
-                            [{ "role": "system", "content": clarificationPrompt }],
-                            modelHigh, apiKey, (d) => d.status, "DirectorClarification"
-                        );
-
-                        console.log("🤖 AI DECISION:", clarCheck.parsed);
-
-                        if (clarCheck.parsed.status === "OPTIONS") {
-							// Ensure names have carets if the AI forgot them
-							let rawContent = clarCheck.parsed.content;
-							let wrappedContent = rawContent.split(',').map(name => {
-								name = name.trim();
-								return name.startsWith('<<') ? name : `<<${name}>>`;
-							}).join(', ');
-
-							return { 
-								choices: [{ message: { content: JSON.stringify({ 
-									response: `I found several matches in the archive: ${wrappedContent}. Which one should I access?`,
-									mood: "QUESTION" 
-								}) } }] 
-							};
-						}
-
-                        if (clarCheck.parsed.status === "MATCH") {
-                            const detectedName = clarCheck.parsed.content.trim();
-                            console.log(`🎯 DIRECTOR: Resolved to [${detectedName}]`);
-                            finalKeywords = [detectedName];
-                        } else {
-                            console.warn("⚠️ No confident match in Metadata. Fallback to trait search.");
-                            finalKeywords = cleanKeywords;
-                        }
-                        
-                    } else {
-                        console.warn("⚠️ Director Log Empty for these keywords. Fallback to trait search.");
-                        finalKeywords = cleanKeywords; 
+                    if (ambiguityCheck.parsed.status === "AMBIGUOUS") {
+                         console.groupEnd(); console.groupEnd();
+                         return { choices: [{ message: { content: JSON.stringify({ response: ambiguityCheck.parsed.clarification_question, mood: "QUESTION" }) } }] };
+                    }
+                    if (ambiguityCheck.parsed.status === "RESOLVED") {
+                         if (ambiguityCheck.parsed.resolved_names.length > 0) finalKeywords = ambiguityCheck.parsed.resolved_names;
                     }
                 }
             }
 
-            // 3. EXECUTE DRIVE SEARCH
+            console.log(`   🚀 EXECUTING SEARCH: INCLUDE[${finalKeywords}] EXCLUDE[${excludeKeywords}]`);
+
+            // 2. Execute Drive Search
             const searchReq = await fetch(appsScriptUrl, {
                 method: "POST", body: JSON.stringify({ 
                     action: "director_search", 
                     query: userText,
-                    constraints: finalKeywords 
+                    constraints: finalKeywords, 
+                    exclude_constraints: excludeKeywords 
                 })
             });
-            const searchRes = await searchReq.json();
+            let searchRes = await searchReq.json();
             
-            console.log("🔎 GOOGLE DRIVE SAID:", searchRes); 
+            // --- FIX 4: CLIENT-SIDE NEGATIVE CONSTRAINT ENFORCEMENT ---
+            if (searchRes.found && excludeKeywords.length > 0) {
+                const originalCount = searchRes.files.length;
+                searchRes.files = searchRes.files.filter(f => {
+                    const meta = (f.name + " " + (f.description || "")).toLowerCase();
+                    return !excludeKeywords.some(ex => meta.includes(ex.toLowerCase()));
+                });
+                if (searchRes.files.length === 0 && originalCount > 0) {
+                    searchRes.found = false; 
+                    console.log("   ❌ All files filtered by Negative Constraints.");
+                }
+            }
+
+            // --- FIX 1: COOPERATIVE SEARCH FALLBACK + VISUAL DECK RETRIEVAL ---
+            let fallbackResponse = "";
+            if (!searchRes.found && finalKeywords.length > 1) {
+                console.warn("⚠️ Strict Search Failed. Attempting Cooperative Fallback Analysis...");
+                fallbackResponse = `I couldn't find a single scene with BOTH ${finalKeywords.join(" and ")}. However, I can likely access their individual footage. Which one should I prioritize?`;
+                
+                // [NEW] Trigger Decks for the missing pair anyway, so user can see them
+                let deckPayload = {
+                    directorAction: "SHOW_DECKS",
+                    deckKeywords: finalKeywords
+                };
+
+                return { 
+                    ...deckPayload, 
+                    files: [], 
+                    choices: [{ message: { content: JSON.stringify({ 
+                        response: fallbackResponse,
+                        mood: "QUESTION" 
+                    }) } }] 
+                };
+            }
+
+            console.log("   🔎 DRIVE RESPONSE:", searchRes); 
+            console.groupEnd(); // END SEARCH LOG
+            console.groupEnd(); // END DIRECTOR MODE LOG
 
             return { 
                 directorAction: "PLAY_MEDIA",
@@ -427,7 +611,8 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                 }) } }] 
             };
         }
-
+        
+        console.groupEnd(); // END FALLBACK LOG
         return { choices: [{ message: { content: JSON.stringify({ response: aiRes.response, mood: "CRYPTIC" }) } }] };
     }
 
