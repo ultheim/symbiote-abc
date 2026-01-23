@@ -6,7 +6,7 @@ window.currentMood = "NEUTRAL";
 window.glitchMode = false;
 window.questionMode = false; 
 window.directorMode = false; // MOVED HERE: Global flag
-window.textMode = false; 
+window.textMode = true; 
 window.viewingHistory = false; 
 window.mediaTimeout = null;
 
@@ -342,6 +342,26 @@ async function handleChat(userText) {
             throw new Error("Invalid API Response");
         }
 		
+		// ============================================================
+        // 1. INSERT THIS BLOCK: HANDLE "SHOW_DECKS"
+        // ============================================================
+        if (data.directorAction === "SHOW_DECKS" && data.deckKeywords) {
+            console.log("🃏 DIRECTOR ACTION: Spawning Decks for", data.deckKeywords);
+            
+            // Clear existing visuals to prevent clutter
+            window.visualsHidden = true; 
+            window.clearDecksSmoothly();
+            
+            // Spawn the new decks
+            if (window.spawnEntityVisuals) {
+                // Small delay to allow the clear animation to start
+                setTimeout(() => {
+                    window.spawnEntityVisuals(data.deckKeywords);
+                }, 100);
+            }
+        }
+        // ============================================================
+		
         // --- DIRECTOR MODE: MEDIA RESPONSE ---
         if (data.directorAction && data.directorAction === "PLAY_MEDIA") {
             if (window.mediaTimeout) clearTimeout(window.mediaTimeout);
@@ -607,28 +627,39 @@ async function handleChat(userText) {
         // ... inside handleChat ...
         let watchdog = 0;
         const checkEating = setInterval(() => {
-			watchdog += 50;
-			// Wait for feeding/audio to end OR 3-second timeout
-			if ((window.feedingActive === false || document.querySelectorAll('.char-span').length === 0) || watchdog > 3000) { 
-				clearInterval(checkEating);      
-				
-				// [FIX] CHECK VISUALS STATE BEFORE SHOWING TEXT
-				// If visual Decks are open OR Director Video is active, do NOT show text box
-				// UNLESS user explicitly asked for Text Mode.
-				if (window.textMode || !window.visualsHidden) {  
-					const textDisplay = document.getElementById('full-text-display');
-					const textContent = document.getElementById('text-content');
-					if (textDisplay && textContent) {
-						textContent.textContent = json.response;
-						textDisplay.classList.remove('hidden');
-						window.viewingHistory = true; 
-					}
-				} else if (!window.textMode) {
+            watchdog += 50;
+            // Wait for feeding/audio to end OR 3-second timeout
+            if ((window.feedingActive === false || document.querySelectorAll('.char-span').length === 0) || watchdog > 3000) { 
+                clearInterval(checkEating);      
+                
+                // [UPDATED] DISPLAY LOGIC
+                if (window.textMode || !window.visualsHidden) {  
+                    const textDisplay = document.getElementById('full-text-display');
+                    const textContent = document.getElementById('text-content');
+                    if (textDisplay && textContent) {
+                        // 1. Set the text
+                        textContent.innerHTML = `<strong>SYMBIOSIS</strong>${json.response}`;
+                        
+                        // 2. Reveal
+                        textDisplay.classList.remove('hidden');
+                        window.viewingHistory = true; 
+                        
+                        // 3. Scroll Logic:
+                        // Because of the bottom-fade mask, we want the text 
+                        // to sit comfortably in the middle-bottom.
+                        // We use a small timeout to let the DOM render the height first.
+                        setTimeout(() => {
+                            // Scroll to a position where the text is visible within the mask
+                            // (Usually slightly offset from the very top)
+                            textDisplay.scrollTop = textDisplay.scrollHeight; 
+                        }, 50);
+                    }
+                } else if (!window.textMode) {
                      // If visuals ARE hidden (Video playing), we usually rely on Audio
-					 window.speak(json.response);      
-				}
-			}
-		}, 50);
+                     window.speak(json.response);      
+                }
+            }
+        }, 50);
 
     } catch (error) {
         console.error("CHAT ERROR:", error); 
@@ -639,9 +670,18 @@ async function handleChat(userText) {
 }
 
 window.handleInput = function() {
-    window.visualsHidden = false; // <--- BRING THEM BACK
-    window.clearDecksSmoothly();
-	const input = document.getElementById('wordInput');
+    // --- FIX: IMMEDIATE CLEAR TRIGGER ---
+    // 1. Fade out the text box immediately
+    const textDisplay = document.getElementById('full-text-display');
+    if (textDisplay) textDisplay.classList.add('hidden');
+
+    // 2. Trigger the "train out" animation for decks immediately
+    if (window.clearDecksSmoothly) window.clearDecksSmoothly();
+    
+    // --- EXISTING CODE CONTINUES BELOW ---
+    window.visualsHidden = false; 
+    const input = document.getElementById('wordInput');
+    // ... rest of function ...
     const text = input.value.trim();
     
 	if (window.directorMode && text.toLowerCase() === "update id") {
@@ -782,42 +822,68 @@ window.onload = () => {
 }
 
 window.handleEntitySelection = function(name, selectedStackElement) {
-    // 1. Identify the Parent Unit (Wrapper of Stack + Label + Indicators)
-    // We must animate the whole UNIT, otherwise the label gets left behind.
+    // 1. Identify the Parent Unit
     const selectedUnit = selectedStackElement.closest('.entity-unit');
     const allUnits = document.querySelectorAll('.entity-unit');
+    const container = document.getElementById("entity-deck-container");
 
-    // 2. Animate the others away immediately
+    // 2. [FIX] ABSOLUTE SCROLL CALCULATION
+    // We calculate the exact pixel position needed by comparing visual coordinates
+    // and adding the difference to the CURRENT scroll position.
+    if (container && selectedUnit) {
+        const containerRect = container.getBoundingClientRect();
+        const unitRect = selectedUnit.getBoundingClientRect();
+        const currentScroll = container.scrollLeft;
+        
+        // How far is the unit from the left edge of the container (visually)?
+        const relativeLeft = unitRect.left - containerRect.left;
+        
+        // We want that distance to become: (ContainerWidth / 2) - (UnitWidth / 2)
+        // So we shift the scroll by the difference.
+        const scrollShift = relativeLeft - (container.clientWidth / 2) + (unitRect.width / 2);
+        
+        container.scrollTo({
+            left: currentScroll + scrollShift,
+            behavior: 'smooth'
+        });
+    }
+
+    // 3. Animate the others away
     allUnits.forEach(unit => {
         if (unit !== selectedUnit) {
-            // Send others to the "Train Graveyard" (Zip right)
             unit.classList.add('dissolving');
         } else {
-            // Highlight the winner
             unit.classList.add('selected');
         }
     });
 
-    // 3. Send command to LLM
+    // 4. Send command to LLM
     const input = document.getElementById('wordInput');
-    // Visual feedback in input
     if(input) input.value = `Accessing ${name}...`; 
     
     window.handleChat(`Show me ${name}`);
 };
-
 // --- REPLACE 'spawnEntityVisuals' IN main.js ---
 
 window.spawnEntityVisuals = async function(entityNames) {
+    // 1. [FIX] FORCE UNIQUENESS IMMEDIATELY
+    // This removes duplicates like ["Jemi", "Jemi"] -> ["Jemi"]
+    if (!entityNames) return;
+    entityNames = [...new Set(entityNames)]; 
+
     const textDisplay = document.getElementById('full-text-display');
-    if (textDisplay) textDisplay.classList.add('hidden');
+    //if (textDisplay) textDisplay.classList.add('hidden');
     window.visualsHidden = true;
 
     // Clear previous
     const container = document.getElementById("entity-deck-container");
     container.innerHTML = ""; 
-
-    if(!entityNames || entityNames.length === 0) return;
+	
+	container.style.display = "flex";
+    container.style.justifyContent = "safe center"; 
+    container.style.gap = "40px"; // Adds nice spacing between decks
+	
+    if(entityNames.length === 0) return;
     const appsScriptUrl = localStorage.getItem("symbiosis_apps_script_url");
 
     // 1. Create Layout Wrapper for each Entity
