@@ -662,7 +662,11 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     CURRENT INPUT: "${userText}"
     
     TASK:
-    1. KEYWORDS: Extract 3-5 specific search terms from the input. Always include synonyms.
+    0. RETROACTIVE MERGE (CRITICAL): 
+       - IF "CURRENT INPUT" is primarily a date/time (e.g., "Yesterday", "In 2026", "27-29 Jan") AND the previous User message in "CONTEXT" was a detailed event that wasn't saved (or asked "When?"):
+       - YOU MUST COMBINE THEM. Treat the *previous detailed message* as the fact, apply the *new date*, and output the FULL combined memory.
+	
+	1. KEYWORDS: Extract 3-5 specific search terms from the input. Always include synonyms.
        - Example: "My stomach hurts" -> Keywords: ["Stomach", "Pain", "Health", "Sick"]
        - CRITICAL: This is used for database retrieval. Be specific.
        - You must ALSO append 2 relevant categories from this list: [Identity, Preference, Location, Relationship, History, Work].
@@ -1186,4 +1190,5 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     return { choices: [{ message: { content: generationResult.cleaned } }] };
 
 };
+
 
