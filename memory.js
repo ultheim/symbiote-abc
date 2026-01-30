@@ -670,7 +670,7 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
 	   - CRITICAL: Only 1 word per keyword. (e.g. no "Arvin's dog", just "Arvin", "Dog")
 
     2. MEMORY ENTRIES (ADAPTIVE SPLITTING): 
-       - If input is a continuous story (e.g. "I went to the zoo then ate toast"), keep as ONE entry.
+       - If input is a continuous story (e.g. "I went to the zoo then ate toast"), keep as ONE entry, but you MUST preserve ALL details and the stories (quantitative, qualitative, names, etc).
        - If input has UNRELATED facts (e.g. "I like red. My dog is sick.") or NONCONTINUOUS story, SPLIT into separate entries.
        - If QUESTION/CHIT-CHAT/NO NEW INFO, return empty array [].
 
@@ -1186,3 +1186,4 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     return { choices: [{ message: { content: generationResult.cleaned } }] };
 
 };
+
