@@ -647,54 +647,64 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     }
 
     // --- STEP 1: HYBRID SENSORY ANALYSIS (STANDARD MODE) ---
-    // ... (This part of your code remains exactly the same as before) ...
-    // ... Copy the rest of your existing function from STEP 1 downwards here ...
     
-    // FOR BREVITY: I am not pasting the bottom half of the function (Step 1 to Step 5) 
-    // because it hasn't changed. Just make sure you keep the code below this line!
-    
+    // 1. CHECK FOR PENDING "TIMEKEEPER" FACTS (Fix for Conversation Drop)
+    const pendingFact = localStorage.getItem("symbiosis_pending_fact");
+    let pendingContext = "";
+    if (pendingFact) {
+        console.log("⏳ Found Pending Fact:", pendingFact);
+        pendingContext = `\n*** PENDING UNRESOLVED MEMORY ***\nUser previously stated: "${pendingFact}" but was interrupted to ask for a time/date.\nIF the "CURRENT INPUT" provides that context (even vaguely), MERGE them.`;
+    }
+
     const synthPrompt = `
     USER_IDENTITY: Arvin, (pronoun: he, him, his) unless said otherwise
     CURRENT_DATE: ${today}
     CONTEXT:
     ${historyText.slice(-800)}
+    ${pendingContext}
     
     CURRENT INPUT: "${userText}"
     
     TASK:
     0. RETROACTIVE MERGE (CRITICAL): 
-       - IF "CURRENT INPUT" is primarily a date/time (e.g., "Yesterday", "In 2026", "27-29 Jan") AND the previous User message in "CONTEXT" was a detailed event that wasn't saved (or asked "When?"):
-       - YOU MUST COMBINE THEM. Treat the *previous detailed message* as the fact, apply the *new date*, and output the FULL combined memory.
-	
-	1. KEYWORDS: Extract 3-5 specific search terms from the input. Always include synonyms.
-       - Example: "My stomach hurts" -> Keywords: ["Stomach", "Pain", "Health", "Sick"]
-       - CRITICAL: This is used for database retrieval. Be specific.
-       - You must ALSO append 2 relevant categories from this list: [Identity, Preference, Location, Relationship, History, Work].
-       - Example: User says "Any restaurant recs" -> Keywords: ["Restaurant", "Lunch", "Dinner", "Location", "Preference"]
-	   - CRITICAL: Only 1 word per keyword. (e.g. no "Arvin's dog", just "Arvin", "Dog")
+       - IF "PENDING UNRESOLVED MEMORY" is present, prioritize merging it with CURRENT INPUT.
+       - IF "CURRENT INPUT" is just a date (e.g. "2024"), attach it to the pending fact.
+       - IF "CURRENT INPUT" is conversational (e.g. "It was cold"), merge that detail with the pending fact and mark as a NEW entry.
+       - IF "CURRENT INPUT" is a date/time (e.g., "Yesterday", "In 2026", "27-29 Jan") AND the previous User message in "CONTEXT" was a detailed event that wasn't saved: COMBINE THEM.
+    
+    1. KEYWORDS: Extract 3-5 specific search terms. 
+       - CRITICAL: Appended categories MUST choose from: [Identity, Preference, Location, Relationship, History, Work, Generativity, SocialFitness].
+       - "Generativity" Trigger: Mentoring, teaching, leaving a legacy, helping others grow.
 
     2. MEMORY ENTRIES (ADAPTIVE SPLITTING): 
-       - If input is a continuous story (e.g. "I went to the zoo then ate toast"), keep as ONE entry, but you MUST preserve ALL details and the stories (quantitative, qualitative, names, etc).
-       - If input has UNRELATED facts (e.g. "I like red. My dog is sick.") or NONCONTINUOUS story, SPLIT into separate entries.
-       - If QUESTION/CHIT-CHAT/NO NEW INFO, return empty array [].
+       - Continuous stories = ONE entry. Unrelated facts = SPLIT entries.
+       - *** "DEAD END" PROTOCOL (Fix for Recursive Loop) ***: 
+         IF User says "I don't know", "Not sure", or "No idea" in response to a question:
+         CREATE AN ENTRY: "User does not know [Topic/Detail]." (Importance: 2).
+         REASON: This prevents the system from asking the same question again later.
 
-    3. FACT FORMATTING (For each entry):
+    3. FACT FORMATTING & METADATA:
        - Write in third person (Arvin...).
-       - Please retain all qualitative and quantitative information.
-       - CRITICAL DATE RULE:
-         > IF A SPECIFIC TIME IS MENTIONED (e.g. "yesterday", "last week"), convert to absolute date (YYYY-MM-DD).
-         > IF NO TIME IS MENTIONED, DO NOT GUESS. Leave the fact without a date.
-       - Entities: Comma-separated list of people/places for THAT specific entry.
-       - Topics: Broad categories. Choose ONLY from: Identity, Preference, Location, Relationship, History, Work.
+       - Entities: Comma-separated list.
+       - Topics: Choose from [Identity, Preference, Location, Relationship, History, Work, Generativity].
+       - You must evaluate the **emotional nutritional value** of this interaction:
+         > "Energizing": Uplifting, supportive, fun, "Side-by-Side" bonding (doing things together).
+         > "Depleting": Conflict, draining, neglectful, stressful, vague anxiety.
+         > "Neutral": Routine, transactional.
+         *Append this to the "topics" string (e.g., "Relationship, Energizing, SocialFitness").*
 
     4. METADATA & IMPORTANCE GUIDE:
        - IMPORTANCE (1-10):
-         > 1-3: Trivial (Preferences like food/color, fleeting thoughts).
-         > 4-6: Routine (Work updates, daily events, general status).
-         > 7-8: Significant (Relationship changes, health events, trips, new jobs).
-         > 9-10: Life-Defining (Marriage, Death, Birth, Major Relocation).
+         > 1-3: Trivial.
+         > 4-6: Routine.
+         > 7-8: Significant (Relationship changes, "Side-by-Side" Bonding activities).
+         > 9-10: Life-Defining.
        
-    If QUESTION/CHIT-CHAT/KNOWN INFO, return empty array [].
+       - *** "SIDE-BY-SIDE" RULE ***: 
+         Men often build intimacy through **shared activities** (gaming, hiking, sports) rather than face-to-face talk. 
+         IF user describes a shared activity with a Close Entity, MARK AS SIGNIFICANT (7-8) and tag [BONDING].
+    
+    If QUESTION/CHIT-CHAT/KNOWN INFO/COMMANDS, return empty array [].
     
     Return JSON only: { 
         "search_keywords": ["..."],  
@@ -726,11 +736,15 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
             analysis.search_keywords = analysis.search_keywords.split(',').map(s => s.trim());
         }
         
+        // [FIX] CLEANUP PENDING FACT
+        // If analysis succeeded, we assume the AI handled the pending merge or created a new fact.
+        if (pendingFact) {
+            localStorage.removeItem("symbiosis_pending_fact");
+        }
+        
         console.log("📊 Analysis:", analysis);
     } catch (e) { console.error("Analysis Failed", e); }
 
-    // --- STEP 2: THE TIMEKEEPER (SILENT VALIDATOR) ---
-    // Logic: If a significant event lacks a specific timeframe, discard it.
     // --- STEP 2: THE TIMEKEEPER & INTERCEPTOR ---
     if (analysis.entries && analysis.entries.length > 0) {
         
@@ -750,11 +764,25 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
             const timePrompt = `
             FACT: "${entry.fact}"
             CURRENT_DATE: ${today}
-            TASK: Determine if this is a specific past event (e.g. "went to", "visited").
+            TASK: Determine if this fact requires a specific date.
+            
             RULES:
-            - If it is an EVENT/RELATIONSHIP but lacks a specific absolute date or month or year /timeframe -> return "valid": false.
-            - If it is a STATE/PREFERENCE/HISTORY (e.g. "was fat", "likes sushi") -> return "valid": true.
-            - If it has a date or month or year -> return "valid": true.
+            1. EPISODIC EVENTS (Priority):
+               - If the fact mentions a specific temporary event (e.g. "trip", "visit", "meeting", "incident").
+               - AND it lacks a specific date/year.
+               - RETURN "valid": false.
+               - CRITICAL: This applies even if the user is describing a "feeling" or "opinion" that happened *during* the event.
+
+            2. "SIDE-BY-SIDE" EXCEPTION (Social Fitness):
+               - If the fact describes a **shared activity/bonding moment** (e.g. "Gaming with Cody", "Playing tennis with Dad"), this is "Relational Maintenance".
+               - RETURN "valid": true (even if date is missing).
+            
+            3. GENERAL STATES (Lower Priority):
+               - If it is a general trait, preference, or history (e.g. "was fat", "likes sushi", "is rich") WITHOUT a specific event attached -> return "valid": true.
+
+            4. DATED:
+               - If it already has a date -> return "valid": true.
+
             Return JSON: { "valid": boolean, "rewritten_fact": "..." }
             `;
 
@@ -769,16 +797,44 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                     entry.fact = timeResult.parsed.rewritten_fact || entry.fact;
                     validEntries.push(entry);
                 } else {
-                    // === INTERCEPTOR FIRES ===
+                    // === INTERCEPTOR FIRES (SMART CONTEXT AWARE) ===
                     console.warn(`⚠️ Interceptor Triggered: Event Missing Date ("${entry.fact}")`);
                     
+                    // [FIX] PERSIST FACT FOR NEXT TURN
+                    // We save this so Step 1 (Retroactive Merge) can pick it up next time.
+                    localStorage.setItem("symbiosis_pending_fact", entry.fact);
+
+                    // 1. Quick Context Search: Do we have similar events?
+                    let potentialMatches = "No related records found.";
+                    if (appsScriptUrl && analysis.search_keywords && analysis.search_keywords.length > 0) {
+                        try {
+                            const matchReq = await fetch(appsScriptUrl, {
+                                method: "POST", 
+                                headers: { "Content-Type": "text/plain" },
+                                body: JSON.stringify({ action: "retrieve", keywords: analysis.search_keywords }) 
+                            });
+                            const matchRes = await matchReq.json();
+                            if (matchRes.found && matchRes.relevant_memories.length > 0) {
+                                potentialMatches = matchRes.relevant_memories.join("\n");
+                            }
+                        } catch(e) { console.warn("Interceptor Search Failed", e); }
+                    }
+
                     const interceptPrompt = `
                     User said: "${userText}"
                     Fact detected: "${entry.fact}"
-                    ISSUE: User mentioned an event but didn't say WHEN.
-                    INSTRUCTIONS: Ask the user "When did this happen?" naturally. 
-                    - Keep it short.
-                    - Do not answer the user's input yet, just ask for the time.
+                    
+                    EXISTING DATABASE RECORDS:
+                    ${potentialMatches}
+
+                    ISSUE: User mentioned an event but didn't specify WHEN (Date/Year).
+                    
+                    INSTRUCTIONS:
+                    1. CHECK "EXISTING DATABASE RECORDS" for similar events (matching location, people, or topic).
+                    2. IF MATCHES FOUND: Ask the user to clarify if they mean one of those specific instances.
+                       - Example: "Do you mean the Shanghai trip in Jan 2025, or the biz trip in July?"
+                    3. IF NO MATCHES: Just ask "When did this happen?" naturally.
+                    
                     Return JSON: { "response": "..." }
                     `;
 
@@ -787,12 +843,10 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                         modelHigh, apiKey, (d) => d.response, "Interceptor"
                     );
 
-                    // === CRITICAL FIX: Wrap in JSON Structure ===
-                    // The main system expects a JSON string with response, mood, and roots.
                     const safePayload = {
                         response: intercept.parsed.response,
-                        mood: "CURIOUS", // Force mood
-                        roots: []        // Empty graph updates
+                        mood: "CURIOUS", 
+                        roots: []        
                     };
 
                     return { choices: [{ message: { content: JSON.stringify(safePayload) } }] };
@@ -808,8 +862,10 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     }
 
 
-   // --- STEP 3: GLOBAL RETRIEVAL (Deep Subject Anchor) ---
+   // --- STEP 3: GLOBAL RETRIEVAL (Deep Subject Anchor + Ghost Audit) ---
     let retrievedContext = "";
+    const triggerAudit = Math.random() < 0.05; // 5% chance
+
     if (appsScriptUrl) {
         let searchKeys = analysis.search_keywords || [];
         
@@ -833,30 +889,33 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                 searchKeys = searchKeys.concat(stickyWords);
             }
 
-            // 3. === CRITICAL FIX: DEEP ANCHOR SEARCH ===
-            // If user says "IDK" multiple times, we lose the name "Jemi" if we only look back 1 turn.
-            // We scan back 5 turns to find the last Proper Noun.
+            // 3. DEEP ANCHOR SEARCH
             if (isQuestionMode || userText.length < 30) {
                 const userMsgs = history.filter(h => h.role === "user");
                 let limit = Math.max(0, userMsgs.length - 5);
                 
                 for (let i = userMsgs.length - 1; i >= limit; i--) {
                     const msg = userMsgs[i].content;
-                    // Find capitalized words (Potential Names)
                     const caps = msg.match(/[A-Z][a-zA-Z]+/g);
                     if (caps) {
-                        // Filter out start-of-sentence common words
                         const validCaps = caps.filter(w => !["Who", "What", "Where", "When", "Why", "How", "I", "No", "Yes", "I'm"].includes(w));
                         if (validCaps.length > 0) {
                             searchKeys = searchKeys.concat(validCaps);
                             console.log(`⚓ Deep Anchor Found (depth ${userMsgs.length - i}):`, validCaps);
-                            break; // Stop once we find a subject
+                            break; 
                         }
                     }
                 }
             }
         }
         
+        // [FIX] GHOST AUDIT INJECTION
+        // If Audit triggers, force "Relationship" keys into search to find neglected entities
+        if (triggerAudit && !isQuestionMode) {
+            console.log("🕵️ ATTENTION AUDIT TRIGGERED: Injecting Relationship Keys");
+            searchKeys.push("Relationship", "BONDING", "SocialFitness");
+        }
+
         searchKeys = [...new Set(searchKeys)].filter(w => w && w.length > 2);
 
         // Fallback
@@ -884,7 +943,7 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     // --- STEP 4: GENERATION (Hybrid Prompt) ---
     // 1. DEFINE SWAPPABLE PERSONA LOGIC
     let responseRules = "";
-
+		
     if (isQuestionMode) {
         // === INTERROGATION MODE (Strict Anti-Nagging + Context Locking) ===
         responseRules = `
@@ -916,9 +975,39 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
              3. Ask ONE specific question.
         `;
     } else {
-        // === COMPANION MODE (Default v11 Logic) ===
+        // === THE GOOD LIFE PROTOCOLS (Dynamic Social Coaching) ===
+        // We do not use hardcoded keywords. The AI must assess the Emotional Context.
+        
         responseRules = `
-        2. RESPOND to the User according to these STRICT rules: 
+        2. RESPOND by dynamically selecting ONE of the following "Social Fitness" Protocols based on User Input:
+
+           --- PROTOCOL A: W.I.S.E.R. (For Conflict/Friction) ---
+           IF User expresses **EXTREME** ANGER or **DIRECT CONFLICT** with another person (Ignore self-reflection or simple questions):
+           - DO NOT just agree/validate.
+           - APPLY W.I.S.E.R.:
+             1. **WATCH**: Ask user to separate what happened (facts) from what they felt.
+             2. **INTERPRET**: Gently ask if there's a generous interpretation of the other person's intent.
+             3. **SELECT**: Ask "What is your goal for this connection right now?"
+           - TONE: "DETECTING SOCIAL FRICTION. INITIATING W.I.S.E.R. PROTOCOL."
+
+           --- PROTOCOL B: SAVORING (For Connection/Joy) ---
+           IF User expresses JOY, a WIN, or a "SIDE-BY-SIDE" BONDING moment (gaming, sports, hanging out):
+           - "Attention is the currency of love."
+           - DEEPEN the moment. Ask a specific question to help them "relive" the best part.
+           - Do not move on quickly. Stay in the pocket of that good feeling.
+           
+           --- PROTOCOL C: GENERATIVITY (For Stagnation/Sadness) ---
+           IF User feels STUCK, OLD, or VALUELESS:
+           - Scan "DATABASE RESULTS" for instances of them helping/mentoring others.
+           - Remind them: "ACCESSING LEGACY FILES. YOU HELPED [Name]. GENERATIVITY SCORE: HIGH."
+
+           --- PROTOCOL D: ATTENTION AUDIT (For Neglect) ---
+           IF (Random trigger: ${triggerAudit}) AND User is casual:
+           - CHECK "DATABASE RESULTS". Is there a High-Importance entity not mentioned in "HISTORY" (recent logs)?
+           - OUTPUT: "SYSTEM ALERT: SOCIAL ATROPHY DETECTED. SUBJECT [Name] UNTOUCHED FOR [X] CYCLES. INITIATE CONTACT?"
+
+           --- PROTOCOL E: COMPANION (Standard) ---
+           IF none of the above apply: RESPOND to the User according to these STRICT rules: 
            - **MODE: COMPANION**. Minimalist. Casual. Guarded.
            - **THE "NEED TO KNOW" RULE**: Do NOT volunteer specific data points (jobs, specific locations, specific foods) unless the user explicitly asks to elaborate.
            - **GENERAL QUERY RESPONSE**: If the user asks "Who is [Name]?", return ONE sentence describing the relationship and a vague vibe. STOP THERE unless the user explicitly asks to elaborate..
@@ -1106,22 +1195,47 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
     // --- STEP 5: STORE (Hybrid V1 Data + V2 Score + Deduplication Check) ---
     if (appsScriptUrl && analysis.entries && analysis.entries.length > 0) {
         (async () => {
-            // [FIX] The loop was missing in your previous paste!
             for (const entry of analysis.entries) {
                 if (!entry.fact || entry.fact === "null") continue;
                 
+                // [FIX] TARGETED SEMANTIC CHECK (The Context Gap Fix)
+                // Fetch context specific to THIS fact to find semantic duplicates.
+                let specificContext = "";
+                try {
+                    // Extract keywords just for this fact (Words > 4 chars)
+                    const factKeywords = entry.fact.split(" ")
+                        .filter(w => w.length > 4)
+                        .slice(0, 3);
+                    
+                    if (factKeywords.length > 0) {
+                        const targetReq = await fetch(appsScriptUrl, {
+                            method: "POST", 
+                            headers: { "Content-Type": "text/plain" },
+                            body: JSON.stringify({ action: "retrieve", keywords: factKeywords })
+                        });
+                        const targetRes = await targetReq.json();
+                        if (targetRes.found) {
+                            specificContext = targetRes.relevant_memories.join("\n");
+                        }
+                    }
+                } catch(e) { console.warn("Targeted dedup fetch failed", e); }
+
+                // Combine Global Context + Specific Context for the Dedup Prompt
+                const dedupContext = (window.lastRetrievedMemories || "") + "\n" + specificContext;
+                
                 // === DEDUPLICATION & REFINEMENT LOGIC ===
-                if (window.lastRetrievedMemories && window.lastRetrievedMemories.length > 50) {
+                if (dedupContext.length > 20) {
                     
                     const dedupPrompt = `
                     EXISTING MEMORIES:
-                    ${window.lastRetrievedMemories}
+                    ${dedupContext}
                     
                     NEW CANDIDATE FACT: "${entry.fact}"
                     CURRENT ENTITIES: "${entry.entities}"
                     
                     TASK: 
-                    1. DUPLICATE CHECK: Is this event already logged?
+                    1. DUPLICATE CHECK: Is this event (or its semantic equivalent) already logged?
+                       - Example: "Hate kale" == "Detests leafy greens" -> DUPLICATE.
                     2. ENTITY RESOLUTION: Replace generic names with specific ones (e.g. "Mom" -> "Liliani").
                     3. CLEANUP (CRITICAL): Remove "Arvin stated/mentioned/said" prefixes. Just state the absolute fact.
                        - BAD: "Arvin stated that Casey is tall."
@@ -1134,7 +1248,7 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
                        - BAD: "Arvin is afraid of the price."
                        - GOOD: "Arvin is afraid of the price (Note: This is a momentary reaction to this specific event)."
                     
-					Return JSON: 
+                    Return JSON: 
                     { 
                       "status": "DUPLICATE" or "NEW",
                       "better_fact": "The refined fact (clean, no 'Arvin said')",
@@ -1151,16 +1265,16 @@ window.processMemoryChat = async function(userText, apiKey, modelHigh, history =
 
                         if (check.parsed.status === "DUPLICATE") {
                             console.log("🚫 Skipped Duplicate:", entry.fact);
-                            continue; // This is now valid because it is inside the 'for' loop
+                            continue; 
                         }
 
-                        // [FIX] Update FACT
+                        // Update FACT
                         if (check.parsed.better_fact && check.parsed.better_fact.length > 5) {
                              console.log(`✨ Refined Fact: "${entry.fact}" -> "${check.parsed.better_fact}"`);
                              entry.fact = check.parsed.better_fact;
                         }
 
-                        // [FIX] Update ENTITIES
+                        // Update ENTITIES
                         if (check.parsed.better_entities && check.parsed.better_entities.length > 2) {
                              console.log(`🏷️ Refined Tags: [${entry.entities}] -> [${check.parsed.better_entities}]`);
                              entry.entities = check.parsed.better_entities;
